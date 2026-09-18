@@ -11,11 +11,17 @@ final class MixerEngine: ObservableObject {
     private let engine = AVAudioEngine()
     private var players: [AVAudioPlayerNode] = []
     private var effectNodes: [AVAudioNode] = []
+    private var limiter: AVAudioUnitEffect?
     private var displayLink: CADisplayLink?
     private let clock = PlayheadClock()
     private var playStartedAt: TimeInterval = 0
     private var playheadAtStart: TimeInterval = 0
     private var episodeDuration: TimeInterval = 0
+
+    init() {
+        installOutputChain()
+        warmUp()
+    }
 
     func toggle(episode: Episode, mediaRoot: URL) {
         if isPlaying {
@@ -26,12 +32,8 @@ final class MixerEngine: ObservableObject {
     }
 
     func play(episode: Episode, mediaRoot: URL) {
-        stopGraph()
-        do {
-            try AudioSession.configure(record: false)
-        } catch {
-            print("session error")
-        }
+        clearPlayers()
+        warmUp(mix: episode.mix)
 
         episodeDuration = max(episode.contentDuration, playhead + 0.1)
         playheadAtStart = playhead
@@ -44,7 +46,6 @@ final class MixerEngine: ObservableObject {
             for clip in track.clips {
                 guard clip.endTime > playhead else { continue }
                 guard let url = mediaRoot.boothFile(clip.playbackFilename),
-                      FileManager.default.fileExists(atPath: url.path),
                       let file = try? AVAudioFile(forReading: url) else { continue }
                 if let job = attach(clip: clip, track: track, episode: episode, file: file) {
                     jobs.append(job)
@@ -52,30 +53,7 @@ final class MixerEngine: ObservableObject {
             }
         }
 
-        let limiter = AVAudioUnitEffect(audioComponentDescription: AudioComponentDescription(
-            componentType: kAudioUnitType_Effect,
-            componentSubType: kAudioUnitSubType_PeakLimiter,
-            componentManufacturer: kAudioUnitManufacturer_Apple,
-            componentFlags: 0,
-            componentFlagsMask: 0
-        ))
-        configureLimiter(limiter, mix: episode.mix)
-        engine.disconnectNodeOutput(engine.mainMixerNode)
-        engine.attach(limiter)
-        engine.connect(engine.mainMixerNode, to: limiter, format: nil)
-        engine.connect(limiter, to: engine.outputNode, format: nil)
-        effectNodes.append(limiter)
-
-        engine.prepare()
-        do {
-            try engine.start()
-        } catch {
-            print("engine start error")
-            return
-        }
-
-        let leadIn: TimeInterval = 0.05
-        let startHost = mach_absolute_time() + AVAudioTime.hostTime(forSeconds: leadIn)
+        let (startHost, leadIn) = playbackAnchor()
         for job in jobs {
             let when = AVAudioTime(hostTime: startHost + AVAudioTime.hostTime(forSeconds: job.delay))
             job.player.scheduleSegment(
@@ -95,7 +73,14 @@ final class MixerEngine: ObservableObject {
     func stop() {
         isPlaying = false
         stopClock()
-        stopGraph()
+        clearPlayers()
+    }
+
+    func shutdown() {
+        stop()
+        if engine.isRunning {
+            engine.stop()
+        }
     }
 
     func seek(_ time: TimeInterval, episode: Episode? = nil, mediaRoot: URL? = nil) {
@@ -109,6 +94,52 @@ final class MixerEngine: ObservableObject {
 
     func skip(_ delta: TimeInterval, episode: Episode, mediaRoot: URL) {
         seek(min(max(0, playhead + delta), max(episode.contentDuration, playhead + delta)), episode: episode, mediaRoot: mediaRoot)
+    }
+
+    private func installOutputChain() {
+        guard limiter == nil else { return }
+        let unit = AVAudioUnitEffect(audioComponentDescription: AudioComponentDescription(
+            componentType: kAudioUnitType_Effect,
+            componentSubType: kAudioUnitSubType_PeakLimiter,
+            componentManufacturer: kAudioUnitManufacturer_Apple,
+            componentFlags: 0,
+            componentFlagsMask: 0
+        ))
+        engine.attach(unit)
+        engine.connect(engine.mainMixerNode, to: unit, format: nil)
+        engine.connect(unit, to: engine.outputNode, format: nil)
+        limiter = unit
+        configureLimiter(unit, mix: MixSettings())
+    }
+
+    private func warmUp(mix: MixSettings = MixSettings()) {
+        do {
+            try AudioSession.configurePlayback()
+        } catch {
+            print("session error")
+        }
+        installOutputChain()
+        if let limiter {
+            configureLimiter(limiter, mix: mix)
+        }
+        if !engine.isRunning {
+            engine.prepare()
+            do {
+                try engine.start()
+            } catch {
+                print("engine start error")
+            }
+        }
+    }
+
+    private func playbackAnchor() -> (host: UInt64, lead: TimeInterval) {
+        let lead: TimeInterval = engine.isRunning ? 0.02 : 0.05
+        if let last = engine.outputNode.lastRenderTime, last.isHostTimeValid {
+            let host = last.hostTime + AVAudioTime.hostTime(forSeconds: lead)
+            let now = mach_absolute_time()
+            return (host > now ? host : now + AVAudioTime.hostTime(forSeconds: lead), lead)
+        }
+        return (mach_absolute_time() + AVAudioTime.hostTime(forSeconds: lead), lead)
     }
 
     private func startClock() {
@@ -152,12 +183,8 @@ final class MixerEngine: ObservableObject {
         return nil
     }
 
-    private func stopGraph() {
+    private func clearPlayers() {
         players.forEach { $0.stop() }
-        if engine.isRunning {
-            engine.pause()
-            engine.stop()
-        }
         players.forEach { engine.detach($0) }
         effectNodes.forEach { engine.detach($0) }
         players.removeAll()
@@ -174,29 +201,35 @@ final class MixerEngine: ObservableObject {
         guard frames > 0 else { return nil }
 
         let player = AVAudioPlayerNode()
-        let isolatorEQ = AVAudioUnitEQ(numberOfBands: 6)
-        configureIsolator(isolatorEQ, clip: clip, mix: episode.mix)
-        let eq = AVAudioUnitEQ(numberOfBands: 8)
-        configureEQ(eq, clip: clip, mix: episode.mix)
-        let dynamics = AVAudioUnitEffect(audioComponentDescription: AudioComponentDescription(
-            componentType: kAudioUnitType_Effect,
-            componentSubType: kAudioUnitSubType_DynamicsProcessor,
-            componentManufacturer: kAudioUnitManufacturer_Apple,
-            componentFlags: 0,
-            componentFlagsMask: 0
-        ))
-        configureDynamics(dynamics, clip: clip, mix: episode.mix)
-
         engine.attach(player)
-        engine.attach(isolatorEQ)
-        engine.attach(eq)
-        engine.attach(dynamics)
-
         let format = file.processingFormat
-        engine.connect(player, to: isolatorEQ, format: format)
-        engine.connect(isolatorEQ, to: eq, format: format)
-        engine.connect(eq, to: dynamics, format: format)
-        engine.connect(dynamics, to: engine.mainMixerNode, format: format)
+        let useEffects = !episode.mix.bypassEffects && clip.effects.needsGraphEffects
+        if useEffects {
+            let isolatorEQ = AVAudioUnitEQ(numberOfBands: 6)
+            configureIsolator(isolatorEQ, clip: clip, mix: episode.mix)
+            let eq = AVAudioUnitEQ(numberOfBands: 8)
+            configureEQ(eq, clip: clip, mix: episode.mix)
+            let dynamics = AVAudioUnitEffect(audioComponentDescription: AudioComponentDescription(
+                componentType: kAudioUnitType_Effect,
+                componentSubType: kAudioUnitSubType_DynamicsProcessor,
+                componentManufacturer: kAudioUnitManufacturer_Apple,
+                componentFlags: 0,
+                componentFlagsMask: 0
+            ))
+            configureDynamics(dynamics, clip: clip, mix: episode.mix)
+            engine.attach(isolatorEQ)
+            engine.attach(eq)
+            engine.attach(dynamics)
+            engine.connect(player, to: isolatorEQ, format: format)
+            engine.connect(isolatorEQ, to: eq, format: format)
+            engine.connect(eq, to: dynamics, format: format)
+            engine.connect(dynamics, to: engine.mainMixerNode, format: format)
+            effectNodes.append(isolatorEQ)
+            effectNodes.append(eq)
+            effectNodes.append(dynamics)
+        } else {
+            engine.connect(player, to: engine.mainMixerNode, format: format)
+        }
 
         var volume = clip.linearGain * Float(track.volume)
         if episode.mix.duckingEnabled, track.kind != .voice {
@@ -210,9 +243,6 @@ final class MixerEngine: ObservableObject {
         player.volume = volume
         player.pan = Float(max(-1, min(1, track.pan)))
         players.append(player)
-        effectNodes.append(isolatorEQ)
-        effectNodes.append(eq)
-        effectNodes.append(dynamics)
         return ScheduledClip(
             player: player,
             file: file,

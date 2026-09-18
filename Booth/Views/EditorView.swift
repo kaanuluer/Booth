@@ -98,7 +98,7 @@ struct EditorView: View {
             importFiles(result)
         }
         .onDisappear {
-            mixer.stop()
+            mixer.shutdown()
             store.save(episode, persistImmediately: true)
         }
     }

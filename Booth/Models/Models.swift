@@ -202,6 +202,17 @@ struct ClipEffects: Codable, Hashable {
     var spectralAmount: Double = 0.7
     var bypassEffects: Bool = false
 
+    var needsGraphEffects: Bool {
+        if bypassEffects { return false }
+        return eqEnabled
+            || noiseEnabled
+            || echoEnabled
+            || (compressorEnabled && compressorPreset != .off)
+            || isolatorPreset.isOn
+            || highPassEnabled
+            || deEssEnabled
+    }
+
     mutating func apply(preset: EQPreset) {
         eqPreset = preset
         bass = preset.bass
