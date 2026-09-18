@@ -492,6 +492,34 @@ struct Episode: Identifiable, Codable, Hashable {
         touch()
     }
 
+    mutating func closeGap(on trackID: UUID, start: TimeInterval, duration: TimeInterval) {
+        guard duration > 0.001, let index = tracks.firstIndex(where: { $0.id == trackID }) else { return }
+        tracks[index].clips = MixMath.rippleShift(
+            clips: tracks[index].clips,
+            removedStart: start,
+            removedDuration: duration
+        )
+        touch()
+    }
+
+    mutating func closeGaps(on trackID: UUID) {
+        guard let index = tracks.firstIndex(where: { $0.id == trackID }) else { return }
+        let packed = MixMath.packClips(tracks[index].clips)
+        guard packed != tracks[index].clips else { return }
+        tracks[index].clips = packed
+        touch()
+    }
+
+    func gap(before clipID: UUID) -> (trackID: UUID, start: TimeInterval, duration: TimeInterval)? {
+        guard let clip = clip(id: clipID), let track = track(containing: clipID) else { return nil }
+        let sorted = track.clips.sorted { $0.startOnTimeline < $1.startOnTimeline }
+        guard let index = sorted.firstIndex(where: { $0.id == clipID }), index > 0 else { return nil }
+        let previous = sorted[index - 1]
+        let duration = clip.startOnTimeline - previous.endTime
+        guard duration >= 0.08 else { return nil }
+        return (track.id, previous.endTime, duration)
+    }
+
     mutating func trimClip(_ id: UUID, edge: TrimEdge, delta: TimeInterval) {
         updateClip(id) { clip in
             switch edge {

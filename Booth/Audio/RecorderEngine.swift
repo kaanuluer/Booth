@@ -8,7 +8,7 @@ enum AudioSession {
             let mode: AVAudioSession.Mode = voiceIsolation ? .voiceChat : .spokenAudio
             try session.setCategory(.playAndRecord, mode: mode, options: [.defaultToSpeaker, .allowBluetoothHFP, .mixWithOthers])
         } else {
-            try session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
+            try session.setCategory(.playback, mode: .default, options: [])
         }
         try session.setPreferredSampleRate(48_000)
         try session.setPreferredIOBufferDuration(0.01)
@@ -17,11 +17,9 @@ enum AudioSession {
 
     static func configurePlayback() throws {
         let session = AVAudioSession.sharedInstance()
-        if session.category != .playback || session.mode != .default {
-            try session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
-            try session.setPreferredSampleRate(48_000)
-            try session.setPreferredIOBufferDuration(0.01)
-        }
+        try session.setCategory(.playback, mode: .default, options: [])
+        try session.setPreferredSampleRate(48_000)
+        try session.setPreferredIOBufferDuration(0.01)
         try session.setActive(true)
     }
 }

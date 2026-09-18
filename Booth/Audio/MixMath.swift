@@ -155,6 +155,34 @@ enum MixMath {
         }
     }
 
+    static func gaps(in clips: [Clip], minDuration: TimeInterval = 0.08) -> [(start: TimeInterval, duration: TimeInterval)] {
+        let sorted = clips.sorted { $0.startOnTimeline < $1.startOnTimeline }
+        guard sorted.count >= 2 else { return [] }
+        var result: [(start: TimeInterval, duration: TimeInterval)] = []
+        for index in 0..<(sorted.count - 1) {
+            let gapStart = sorted[index].endTime
+            let duration = sorted[index + 1].startOnTimeline - gapStart
+            if duration >= minDuration {
+                result.append((gapStart, duration))
+            }
+        }
+        return result
+    }
+
+    static func packClips(_ clips: [Clip]) -> [Clip] {
+        let sorted = clips.sorted { $0.startOnTimeline < $1.startOnTimeline }
+        var cursor: TimeInterval?
+        return sorted.map { clip in
+            var next = clip
+            if let cursor, next.startOnTimeline > cursor + 0.001 {
+                next.startOnTimeline = cursor
+            }
+            let end = next.endTime
+            cursor = cursor.map { max($0, end) } ?? end
+            return next
+        }
+    }
+
     private static func appendRegion(from origin: Int, to end: Int, frameDur: TimeInterval, minKeep: TimeInterval, into regions: inout [Region]) {
         let duration = Double(end - origin) * frameDur
         guard duration >= minKeep else { return }

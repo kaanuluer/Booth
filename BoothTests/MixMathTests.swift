@@ -97,6 +97,32 @@ final class EpisodeEditTests: XCTestCase {
         XCTAssertEqual(episode.tracks[0].clips.first?.startOnTimeline ?? 99, 0, accuracy: 0.01)
     }
 
+    func testCloseGapPullsFollowingClip() {
+        var episode = Episode(title: "Test")
+        let first = Clip(name: "A", filename: "a.m4a", startOnTimeline: 0, duration: 2, sourceDuration: 2)
+        let second = Clip(name: "B", filename: "b.m4a", startOnTimeline: 5, duration: 2, sourceDuration: 2)
+        episode.addClip(first, to: episode.tracks[0].id)
+        episode.addClip(second, to: episode.tracks[0].id)
+        episode.closeGap(on: episode.tracks[0].id, start: 2, duration: 3)
+        XCTAssertEqual(episode.tracks[0].clips[1].startOnTimeline, 2, accuracy: 0.001)
+        XCTAssertEqual(episode.tracks[0].clips[0].startOnTimeline, 0, accuracy: 0.001)
+    }
+
+    func testCloseGapsPacksClipsOnTrack() {
+        var episode = Episode(title: "Test")
+        let first = Clip(name: "A", filename: "a.m4a", startOnTimeline: 1, duration: 2, sourceDuration: 2)
+        let second = Clip(name: "B", filename: "b.m4a", startOnTimeline: 5, duration: 1, sourceDuration: 1)
+        let third = Clip(name: "C", filename: "c.m4a", startOnTimeline: 8, duration: 1, sourceDuration: 1)
+        episode.addClip(first, to: episode.tracks[0].id)
+        episode.addClip(second, to: episode.tracks[0].id)
+        episode.addClip(third, to: episode.tracks[0].id)
+        episode.closeGaps(on: episode.tracks[0].id)
+        let clips = episode.tracks[0].clips.sorted { $0.startOnTimeline < $1.startOnTimeline }
+        XCTAssertEqual(clips[0].startOnTimeline, 1, accuracy: 0.001)
+        XCTAssertEqual(clips[1].startOnTimeline, 3, accuracy: 0.001)
+        XCTAssertEqual(clips[2].startOnTimeline, 4, accuracy: 0.001)
+    }
+
     func testReplaceClipKeepsRegions() {
         var episode = Episode(title: "Test")
         let clip = Clip(name: "Konuşma", filename: "a.m4a", duration: 10, sourceDuration: 10)

@@ -97,6 +97,16 @@ struct EditorView: View {
         .fileImporter(isPresented: $isImporting, allowedContentTypes: [.audio], allowsMultipleSelection: true) { result in
             importFiles(result)
         }
+        .onAppear {
+            mixer.prepareForPlayback()
+        }
+        .onChange(of: showRecord) { _, recording in
+            if recording {
+                mixer.shutdown()
+            } else {
+                mixer.prepareForPlayback()
+            }
+        }
         .onDisappear {
             mixer.shutdown()
             store.save(episode, persistImmediately: true)

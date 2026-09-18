@@ -18,11 +18,6 @@ final class MixerEngine: ObservableObject {
     private var playheadAtStart: TimeInterval = 0
     private var episodeDuration: TimeInterval = 0
 
-    init() {
-        installOutputChain()
-        warmUp()
-    }
-
     func toggle(episode: Episode, mediaRoot: URL) {
         if isPlaying {
             stop()
@@ -33,7 +28,10 @@ final class MixerEngine: ObservableObject {
 
     func play(episode: Episode, mediaRoot: URL) {
         clearPlayers()
-        warmUp(mix: episode.mix)
+        if engine.isRunning {
+            engine.pause()
+        }
+        guard prepareGraph(mix: episode.mix) else { return }
 
         episodeDuration = max(episode.contentDuration, playhead + 0.1)
         playheadAtStart = playhead
@@ -53,20 +51,31 @@ final class MixerEngine: ObservableObject {
             }
         }
 
-        let (startHost, leadIn) = playbackAnchor()
+        engine.prepare()
+        do {
+            try engine.start()
+        } catch {
+            print("engine start error")
+            return
+        }
+
+        engine.mainMixerNode.outputVolume = 1
+        let now = mach_absolute_time()
         for job in jobs {
-            let when = AVAudioTime(hostTime: startHost + AVAudioTime.hostTime(forSeconds: job.delay))
+            let when: AVAudioTime? = job.delay > 0.001
+                ? AVAudioTime(hostTime: now + AVAudioTime.hostTime(forSeconds: job.delay))
+                : nil
             job.player.scheduleSegment(
                 job.file,
                 startingFrame: job.startingFrame,
                 frameCount: job.frameCount,
                 at: when
             )
-            job.player.play(at: AVAudioTime(hostTime: startHost))
+            job.player.play()
         }
 
         isPlaying = true
-        playStartedAt = CACurrentMediaTime() + leadIn
+        playStartedAt = CACurrentMediaTime()
         startClock()
     }
 
@@ -74,12 +83,24 @@ final class MixerEngine: ObservableObject {
         isPlaying = false
         stopClock()
         clearPlayers()
+        if engine.isRunning {
+            engine.pause()
+        }
     }
 
     func shutdown() {
         stop()
         if engine.isRunning {
             engine.stop()
+        }
+    }
+
+    func prepareForPlayback() {
+        _ = prepareGraph(mix: MixSettings())
+        if !engine.isRunning {
+            engine.prepare()
+            try? engine.start()
+            engine.pause()
         }
     }
 
@@ -112,34 +133,23 @@ final class MixerEngine: ObservableObject {
         configureLimiter(unit, mix: MixSettings())
     }
 
-    private func warmUp(mix: MixSettings = MixSettings()) {
+    private func prepareGraph(mix: MixSettings) -> Bool {
+        let session = AVAudioSession.sharedInstance()
+        if session.category != .playback || session.mode != .default, engine.isRunning {
+            engine.stop()
+        }
         do {
             try AudioSession.configurePlayback()
         } catch {
             print("session error")
+            return false
         }
         installOutputChain()
         if let limiter {
             configureLimiter(limiter, mix: mix)
         }
-        if !engine.isRunning {
-            engine.prepare()
-            do {
-                try engine.start()
-            } catch {
-                print("engine start error")
-            }
-        }
-    }
-
-    private func playbackAnchor() -> (host: UInt64, lead: TimeInterval) {
-        let lead: TimeInterval = engine.isRunning ? 0.02 : 0.05
-        if let last = engine.outputNode.lastRenderTime, last.isHostTimeValid {
-            let host = last.hostTime + AVAudioTime.hostTime(forSeconds: lead)
-            let now = mach_absolute_time()
-            return (host > now ? host : now + AVAudioTime.hostTime(forSeconds: lead), lead)
-        }
-        return (mach_absolute_time() + AVAudioTime.hostTime(forSeconds: lead), lead)
+        engine.mainMixerNode.outputVolume = 1
+        return true
     }
 
     private func startClock() {

@@ -78,6 +78,20 @@ struct InspectorPanel: View {
                             episode.removeClip(clip.id, ripple: true)
                         }
                         .buttonStyle(BoothButtonStyle(fill: BoothTheme.elevated, foreground: BoothTheme.text))
+                        Button("Önceki boşluğu sil") {
+                            guard let gap = episode.gap(before: clip.id) else { return }
+                            store.checkpoint(episode)
+                            episode.closeGap(on: gap.trackID, start: gap.start, duration: gap.duration)
+                        }
+                        .buttonStyle(BoothButtonStyle(fill: BoothTheme.elevated, foreground: BoothTheme.text))
+                        .disabled(episode.gap(before: clip.id) == nil)
+                        Button("Katmandaki boşlukları kapat") {
+                            guard let trackID = episode.track(containing: clip.id)?.id else { return }
+                            store.checkpoint(episode)
+                            episode.closeGaps(on: trackID)
+                        }
+                        .buttonStyle(BoothButtonStyle(fill: BoothTheme.elevated, foreground: BoothTheme.text))
+                        .disabled(episode.track(containing: clip.id).map { MixMath.gaps(in: $0.clips).isEmpty } ?? true)
                         Button("Sessizliği oy") {
                             stripSilence(clip)
                         }

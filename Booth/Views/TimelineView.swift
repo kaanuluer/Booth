@@ -112,6 +112,13 @@ struct TimelineView: View {
         .frame(width: headerWidth, height: trackHeight, alignment: .topLeading)
         .clipped()
         .overlay(alignment: .bottom) { Divider().background(BoothTheme.hairline) }
+        .contextMenu {
+            Button("Boşlukları kapat") {
+                onCheckpoint()
+                episode.closeGaps(on: track.wrappedValue.id)
+            }
+            .disabled(MixMath.gaps(in: track.wrappedValue.clips).isEmpty)
+        }
     }
 
     private func volumeBar(_ track: Binding<Track>) -> some View {
@@ -208,6 +215,9 @@ struct TimelineView: View {
                     )
                     .padding(4)
             }
+            ForEach(gaps(on: track.wrappedValue)) { gap in
+                gapBlock(gap, color: BoothTheme.trackColor(track.wrappedValue.kind))
+            }
             ForEach(track.wrappedValue.clips) { clip in
                 clipBlock(clip, track: track.wrappedValue)
             }
@@ -216,6 +226,46 @@ struct TimelineView: View {
         .clipped()
         .contentShape(Rectangle())
         .overlay(alignment: .bottom) { Divider().background(BoothTheme.hairline) }
+    }
+
+    private func gaps(on track: Track) -> [TimelineGap] {
+        MixMath.gaps(in: track.clips).map { gap in
+            TimelineGap(trackID: track.id, start: gap.start, duration: gap.duration)
+        }
+    }
+
+    private func gapBlock(_ gap: TimelineGap, color: Color) -> some View {
+        let x = CGFloat(gap.start) * pixelsPerSecond
+        let w = max(16, CGFloat(gap.duration) * pixelsPerSecond)
+        return Button {
+            onCheckpoint()
+            episode.closeGap(on: gap.trackID, start: gap.start, duration: gap.duration)
+        } label: {
+            ZStack {
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(color.opacity(0.12))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .strokeBorder(color.opacity(0.7), style: StrokeStyle(lineWidth: 1, dash: [5, 4]))
+                    )
+                Image(systemName: "trash")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(color)
+                    .opacity(w >= 22 ? 1 : 0)
+            }
+            .frame(width: w, height: trackHeight - clipInset * 2)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .offset(x: x, y: clipInset)
+        .zIndex(1)
+        .accessibilityLabel("Boşluğu sil")
+        .contextMenu {
+            Button("Boşluğu sil", role: .destructive) {
+                onCheckpoint()
+                episode.closeGap(on: gap.trackID, start: gap.start, duration: gap.duration)
+            }
+        }
     }
 
     private func clipBlock(_ clip: Clip, track: Track) -> some View {
@@ -279,6 +329,12 @@ struct TimelineView: View {
                         .disabled(destination.id == track.id)
                     }
                 }
+                Button("Önceki boşluğu sil") {
+                    guard let gap = episode.gap(before: clip.id) else { return }
+                    onCheckpoint()
+                    episode.closeGap(on: gap.trackID, start: gap.start, duration: gap.duration)
+                }
+                .disabled(episode.gap(before: clip.id) == nil)
                 Button("Sil", role: .destructive) {
                     onCheckpoint()
                     episode.removeClip(clip.id)
@@ -407,4 +463,12 @@ struct TimelineView: View {
                     }
             )
     }
+}
+
+private struct TimelineGap: Identifiable, Hashable {
+    let trackID: UUID
+    let start: TimeInterval
+    let duration: TimeInterval
+
+    var id: String { "\(trackID.uuidString)-\(start)" }
 }
