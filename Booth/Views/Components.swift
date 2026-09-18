@@ -1,0 +1,88 @@
+import SwiftUI
+import AVFoundation
+
+struct BoothButtonStyle: ButtonStyle {
+    var fill: Color = BoothTheme.accent
+    var foreground: Color = .white
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 15, weight: .semibold))
+            .foregroundStyle(foreground)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .background(fill.opacity(configuration.isPressed ? 0.8 : 1), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+}
+
+struct WaveformView: View {
+    var samples: [Float]
+    var color: Color
+    var progress: Double? = nil
+
+    var body: some View {
+        Canvas { context, size in
+            let count = max(samples.count, 1)
+            let mid = size.height / 2
+            let barWidth = max(1, size.width / CGFloat(count) - 1)
+            for (index, sample) in samples.enumerated() {
+                let x = CGFloat(index) / CGFloat(count) * size.width
+                let amp = max(2, CGFloat(sample) * size.height * 0.48)
+                let rect = CGRect(x: x, y: mid - amp, width: barWidth, height: amp * 2)
+                let faded = progress.map { CGFloat(index) / CGFloat(count) < $0 } ?? true
+                context.fill(Path(roundedRect: rect, cornerRadius: 1), with: .color(color.opacity(faded ? 0.95 : 0.28)))
+            }
+        }
+        .clipped()
+    }
+}
+
+struct FileWaveform: View {
+    var url: URL
+    var color: Color
+    var progress: Double? = nil
+    @State private var samples: [Float] = []
+
+    var body: some View {
+        WaveformView(samples: samples.isEmpty ? [0.12, 0.2, 0.18, 0.3, 0.22] : samples, color: color, progress: progress)
+            .task(id: url.path) {
+                let captured = url
+                samples = await Task.detached {
+                    WaveformCache.shared.peaks(url: captured, count: 140)
+                }.value
+            }
+    }
+}
+
+struct MeterBar: View {
+    var level: Float
+
+    var body: some View {
+        GeometryReader { geo in
+            let height = geo.size.height
+            ZStack(alignment: .bottom) {
+                Capsule().fill(BoothTheme.elevated)
+                Capsule()
+                    .fill(levelColor)
+                    .frame(height: max(4, height * CGFloat(level)))
+            }
+        }
+        .frame(width: 10)
+    }
+
+    private var levelColor: Color {
+        if level > 0.9 { return BoothTheme.accent }
+        if level > 0.55 { return BoothTheme.success }
+        return BoothTheme.voice
+    }
+}
+
+struct ShareSheet: UIViewControllerRepresentable {
+    var items: [Any]
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: items, applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
+}
