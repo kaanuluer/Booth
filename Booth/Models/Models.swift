@@ -119,11 +119,46 @@ struct Marker: Identifiable, Codable, Hashable {
     var id: UUID
     var time: TimeInterval
     var label: String
+    var isChapter: Bool
 
-    init(id: UUID = UUID(), time: TimeInterval, label: String = "İşaret") {
+    init(id: UUID = UUID(), time: TimeInterval, label: String = "İşaret", isChapter: Bool = false) {
         self.id = id
         self.time = time
         self.label = label
+        self.isChapter = isChapter
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        time = try container.decode(TimeInterval.self, forKey: .time)
+        label = try container.decodeIfPresent(String.self, forKey: .label) ?? "İşaret"
+        isChapter = try container.decodeIfPresent(Bool.self, forKey: .isChapter) ?? false
+    }
+}
+
+struct MixSettings: Codable, Hashable {
+    var duckingEnabled: Bool = true
+    var duckingAmount: Double = 0.7
+    var autoLevelEnabled: Bool = true
+    var limiterEnabled: Bool = true
+    var limiterCeilingDB: Double = -1.0
+    var crossfade: TimeInterval = 0.03
+    var captureVoiceIsolation: Bool = true
+    var bypassEffects: Bool = false
+
+    init() {}
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        duckingEnabled = try container.decodeIfPresent(Bool.self, forKey: .duckingEnabled) ?? true
+        duckingAmount = try container.decodeIfPresent(Double.self, forKey: .duckingAmount) ?? 0.7
+        autoLevelEnabled = try container.decodeIfPresent(Bool.self, forKey: .autoLevelEnabled) ?? true
+        limiterEnabled = try container.decodeIfPresent(Bool.self, forKey: .limiterEnabled) ?? true
+        limiterCeilingDB = try container.decodeIfPresent(Double.self, forKey: .limiterCeilingDB) ?? -1.0
+        crossfade = try container.decodeIfPresent(TimeInterval.self, forKey: .crossfade) ?? 0.03
+        captureVoiceIsolation = try container.decodeIfPresent(Bool.self, forKey: .captureVoiceIsolation) ?? true
+        bypassEffects = try container.decodeIfPresent(Bool.self, forKey: .bypassEffects) ?? false
     }
 }
 
@@ -158,6 +193,13 @@ struct ClipEffects: Codable, Hashable {
     var echoAmount: Double = 0.55
     var isolatorPreset: VoiceIsolatorPreset = .off
     var isolatorAmount: Double = 0.75
+    var highPassEnabled: Bool = false
+    var highPassHz: Double = 80
+    var deEssEnabled: Bool = false
+    var deEssAmount: Double = 0.45
+    var spectralEnhance: Bool = false
+    var spectralAmount: Double = 0.7
+    var bypassEffects: Bool = false
 
     mutating func apply(preset: EQPreset) {
         eqPreset = preset
@@ -184,6 +226,13 @@ struct ClipEffects: Codable, Hashable {
         echoAmount = try container.decodeIfPresent(Double.self, forKey: .echoAmount) ?? 0.55
         isolatorPreset = try container.decodeIfPresent(VoiceIsolatorPreset.self, forKey: .isolatorPreset) ?? .off
         isolatorAmount = try container.decodeIfPresent(Double.self, forKey: .isolatorAmount) ?? 0.75
+        highPassEnabled = try container.decodeIfPresent(Bool.self, forKey: .highPassEnabled) ?? false
+        highPassHz = try container.decodeIfPresent(Double.self, forKey: .highPassHz) ?? 80
+        deEssEnabled = try container.decodeIfPresent(Bool.self, forKey: .deEssEnabled) ?? false
+        deEssAmount = try container.decodeIfPresent(Double.self, forKey: .deEssAmount) ?? 0.45
+        spectralEnhance = try container.decodeIfPresent(Bool.self, forKey: .spectralEnhance) ?? false
+        spectralAmount = try container.decodeIfPresent(Double.self, forKey: .spectralAmount) ?? 0.7
+        bypassEffects = try container.decodeIfPresent(Bool.self, forKey: .bypassEffects) ?? false
     }
 }
 
@@ -199,6 +248,7 @@ struct Clip: Identifiable, Codable, Hashable {
     var fadeIn: TimeInterval
     var fadeOut: TimeInterval
     var effects: ClipEffects
+    var enhancedFilename: String?
 
     init(
         id: UUID = UUID(),
@@ -211,7 +261,8 @@ struct Clip: Identifiable, Codable, Hashable {
         gainDB: Double = 0,
         fadeIn: TimeInterval = 0,
         fadeOut: TimeInterval = 0,
-        effects: ClipEffects = ClipEffects()
+        effects: ClipEffects = ClipEffects(),
+        enhancedFilename: String? = nil
     ) {
         self.id = id
         self.name = name
@@ -224,9 +275,28 @@ struct Clip: Identifiable, Codable, Hashable {
         self.fadeIn = fadeIn
         self.fadeOut = fadeOut
         self.effects = effects
+        self.enhancedFilename = enhancedFilename
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        filename = try container.decode(String.self, forKey: .filename)
+        startOnTimeline = try container.decode(TimeInterval.self, forKey: .startOnTimeline)
+        sourceOffset = try container.decodeIfPresent(TimeInterval.self, forKey: .sourceOffset) ?? 0
+        duration = try container.decode(TimeInterval.self, forKey: .duration)
+        sourceDuration = try container.decodeIfPresent(TimeInterval.self, forKey: .sourceDuration) ?? duration
+        gainDB = try container.decodeIfPresent(Double.self, forKey: .gainDB) ?? 0
+        fadeIn = try container.decodeIfPresent(TimeInterval.self, forKey: .fadeIn) ?? 0
+        fadeOut = try container.decodeIfPresent(TimeInterval.self, forKey: .fadeOut) ?? 0
+        effects = try container.decodeIfPresent(ClipEffects.self, forKey: .effects) ?? ClipEffects()
+        enhancedFilename = try container.decodeIfPresent(String.self, forKey: .enhancedFilename)
     }
 
     var endTime: TimeInterval { startOnTimeline + duration }
+
+    var playbackFilename: String { enhancedFilename ?? filename }
 
     var linearGain: Float {
         Float(pow(10.0, gainDB / 20.0))
@@ -276,6 +346,10 @@ struct Episode: Identifiable, Codable, Hashable {
     var tracks: [Track]
     var markers: [Marker]
     var library: [MediaAsset]
+    var mix: MixSettings
+    var artworkFilename: String?
+    var introAssetID: UUID?
+    var outroAssetID: UUID?
 
     init(
         id: UUID = UUID(),
@@ -289,7 +363,11 @@ struct Episode: Identifiable, Codable, Hashable {
             .template(.sfx)
         ],
         markers: [Marker] = [],
-        library: [MediaAsset] = []
+        library: [MediaAsset] = [],
+        mix: MixSettings = MixSettings(),
+        artworkFilename: String? = nil,
+        introAssetID: UUID? = nil,
+        outroAssetID: UUID? = nil
     ) {
         self.id = id
         self.title = title
@@ -299,6 +377,28 @@ struct Episode: Identifiable, Codable, Hashable {
         self.tracks = tracks
         self.markers = markers
         self.library = library
+        self.mix = mix
+        self.artworkFilename = artworkFilename
+        self.introAssetID = introAssetID
+        self.outroAssetID = outroAssetID
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        title = try container.decode(String.self, forKey: .title)
+        status = try container.decodeIfPresent(EpisodeStatus.self, forKey: .status) ?? .draft
+        createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
+        updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? Date()
+        tracks = try container.decodeIfPresent([Track].self, forKey: .tracks) ?? [
+            .template(.voice), .template(.music), .template(.sfx)
+        ]
+        markers = try container.decodeIfPresent([Marker].self, forKey: .markers) ?? []
+        library = try container.decodeIfPresent([MediaAsset].self, forKey: .library) ?? []
+        mix = try container.decodeIfPresent(MixSettings.self, forKey: .mix) ?? MixSettings()
+        artworkFilename = try container.decodeIfPresent(String.self, forKey: .artworkFilename)
+        introAssetID = try container.decodeIfPresent(UUID.self, forKey: .introAssetID)
+        outroAssetID = try container.decodeIfPresent(UUID.self, forKey: .outroAssetID)
     }
 
     var contentDuration: TimeInterval {
@@ -340,16 +440,87 @@ struct Episode: Identifiable, Codable, Hashable {
         }
     }
 
-    mutating func removeClip(_ id: UUID) {
-        for t in tracks.indices {
-            tracks[t].clips.removeAll { $0.id == id }
+    mutating func removeClip(_ id: UUID, ripple: Bool = false) {
+        guard let clip = clip(id: id), let trackIndex = tracks.firstIndex(where: { $0.clips.contains { $0.id == id } }) else { return }
+        tracks[trackIndex].clips.removeAll { $0.id == id }
+        if ripple {
+            tracks[trackIndex].clips = MixMath.rippleShift(
+                clips: tracks[trackIndex].clips,
+                removedStart: clip.startOnTimeline,
+                removedDuration: clip.duration
+            )
         }
         touch()
     }
 
+    mutating func trimClip(_ id: UUID, edge: TrimEdge, delta: TimeInterval) {
+        updateClip(id) { clip in
+            switch edge {
+            case .start:
+                let trim = MixMath.trimStart(
+                    startOnTimeline: clip.startOnTimeline,
+                    sourceOffset: clip.sourceOffset,
+                    duration: clip.duration,
+                    sourceDuration: clip.sourceDuration,
+                    delta: delta
+                )
+                clip.startOnTimeline = trim.startOnTimeline
+                clip.sourceOffset = trim.sourceOffset
+                clip.duration = trim.duration
+            case .end:
+                clip.duration = MixMath.trimEnd(
+                    duration: clip.duration,
+                    sourceOffset: clip.sourceOffset,
+                    sourceDuration: clip.sourceDuration,
+                    delta: delta
+                )
+            }
+        }
+    }
+
+    mutating func replaceClip(_ id: UUID, with regions: [MixMath.Region], nameSuffix: String = "") {
+        guard let original = clip(id: id), let trackID = track(containing: id)?.id else { return }
+        removeClip(id)
+        for (index, region) in regions.enumerated() {
+            var piece = original
+            piece.id = UUID()
+            piece.name = regions.count == 1 ? original.name : "\(original.name)\(nameSuffix) \(index + 1)"
+            piece.startOnTimeline = original.startOnTimeline + region.start
+            piece.sourceOffset = original.sourceOffset + region.start
+            piece.duration = region.duration
+            if mix.crossfade > 0 {
+                piece.fadeIn = max(piece.fadeIn, min(mix.crossfade, piece.duration / 3))
+                piece.fadeOut = max(piece.fadeOut, min(mix.crossfade, piece.duration / 3))
+            }
+            addClip(piece, to: trackID)
+        }
+    }
+
+    mutating func applyShowTemplate() {
+        if let introID = introAssetID, let asset = library.first(where: { $0.id == introID }) {
+            if !hasClip(filename: asset.filename, on: .music) {
+                placeAsset(asset, on: .music, at: 0)
+            }
+        }
+        if let outroID = outroAssetID, let asset = library.first(where: { $0.id == outroID }) {
+            if !hasClip(filename: asset.filename, on: .music) {
+                placeAsset(asset, on: .music, at: max(contentDuration, 0.01))
+            }
+        }
+    }
+
+    private func hasClip(filename: String, on kind: TrackKind) -> Bool {
+        tracks.first(where: { $0.kind == kind })?.clips.contains { $0.filename == filename } ?? false
+    }
+
     mutating func addClip(_ clip: Clip, to trackID: UUID) {
         guard let index = tracks.firstIndex(where: { $0.id == trackID }) else { return }
-        tracks[index].clips.append(clip)
+        var next = clip
+        if mix.crossfade > 0 {
+            next.fadeIn = max(next.fadeIn, min(mix.crossfade, next.duration / 3))
+            next.fadeOut = max(next.fadeOut, min(mix.crossfade, next.duration / 3))
+        }
+        tracks[index].clips.append(next)
         tracks[index].clips.sort { $0.startOnTimeline < $1.startOnTimeline }
         if status == .draft { status = .editing }
         touch()
@@ -439,6 +610,11 @@ struct Episode: Identifiable, Codable, Hashable {
     mutating func touch() {
         updatedAt = Date()
     }
+}
+
+enum TrimEdge {
+    case start
+    case end
 }
 
 enum ExportFormat: String, CaseIterable, Identifiable {

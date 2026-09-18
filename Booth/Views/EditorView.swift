@@ -35,6 +35,7 @@ struct EditorView: View {
                             selectedClipID: $selectedClipID,
                             onImport: { isImporting = true },
                             onPlace: { asset in
+                                store.checkpoint(episode)
                                 episode.placeAsset(asset, on: asset.kindHint, at: mixer.playhead)
                             }
                         )
@@ -48,7 +49,8 @@ struct EditorView: View {
                         pixelsPerSecond: pixelsPerSecond,
                         snapEnabled: snapEnabled,
                         mediaRoot: store.mediaDirectory(episode),
-                        onSeek: { mixer.seek($0, episode: episode, mediaRoot: store.mediaDirectory(episode)) }
+                        onSeek: { mixer.seek($0, episode: episode, mediaRoot: store.mediaDirectory(episode)) },
+                        onCheckpoint: { store.checkpoint(episode) }
                     )
                     if let clipID = selectedClipID, episode.clip(id: clipID) != nil {
                         Divider().background(BoothTheme.hairline)
@@ -58,6 +60,7 @@ struct EditorView: View {
                             playhead: mixer.playhead,
                             mediaRoot: store.mediaDirectory(episode)
                         )
+                        .environmentObject(store)
                         .frame(width: 320)
                     }
                 }
@@ -87,6 +90,7 @@ struct EditorView: View {
         guard case .success(let urls) = result else { return }
         for url in urls {
             do {
+                store.checkpoint(episode)
                 let asset = try store.importFile(from: url, into: episode, kind: importKind)
                 episode.library.append(asset)
                 episode.placeAsset(asset, on: asset.kindHint, at: mixer.playhead)
@@ -107,6 +111,7 @@ struct TransportBar: View {
     var onRecord: () -> Void
     var onExport: () -> Void
     @FocusState private var titleFocused: Bool
+    @EnvironmentObject private var store: EpisodeStore
 
     var body: some View {
         HStack(spacing: 16) {
@@ -150,6 +155,31 @@ struct TransportBar: View {
             Text("\(TimeCode.format(mixer.playhead))  /  \(TimeCode.format(episode.contentDuration))")
                 .font(.system(size: 15, weight: .medium, design: .monospaced))
                 .foregroundStyle(BoothTheme.text)
+
+            Button {
+                if let restored = store.undo(for: episode.id) {
+                    episode = restored
+                }
+            } label: {
+                Image(systemName: "arrow.uturn.backward")
+            }
+            .disabled(!(store.undoAvailable[episode.id] ?? false))
+            .keyboardShortcut("z", modifiers: .command)
+
+            Button {
+                if let restored = store.redo(for: episode.id) {
+                    episode = restored
+                }
+            } label: {
+                Image(systemName: "arrow.uturn.forward")
+            }
+            .disabled(!(store.redoAvailable[episode.id] ?? false))
+            .keyboardShortcut("z", modifiers: [.command, .shift])
+
+            Toggle("A/B", isOn: $episode.mix.bypassEffects)
+                .toggleStyle(.button)
+                .tint(episode.mix.bypassEffects ? BoothTheme.accent : BoothTheme.secondary)
+                .font(.system(size: 12, weight: .semibold))
 
             Button {
                 snapEnabled.toggle()

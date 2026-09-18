@@ -60,6 +60,10 @@ struct RecordView: View {
                     .foregroundStyle(BoothTheme.secondary)
             }
             Spacer()
+            Toggle("Voice Isolation", isOn: $episode.mix.captureVoiceIsolation)
+                .tint(BoothTheme.accent)
+                .foregroundStyle(BoothTheme.text)
+                .frame(maxWidth: 220)
             Label("48 kHz", systemImage: "mic.fill")
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(BoothTheme.success)
@@ -195,7 +199,7 @@ struct RecordView: View {
         let filename = store.uniqueFilename(in: episode, preferred: "take.m4a")
         let url = store.mediaURL(for: episode, filename: filename)
         do {
-            try recorder.start(to: url)
+            try recorder.start(to: url, voiceIsolation: episode.mix.captureVoiceIsolation)
             lastURL = url
             episode.status = .recording
             store.save(episode)

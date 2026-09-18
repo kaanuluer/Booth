@@ -5,6 +5,8 @@ struct InspectorPanel: View {
     var clipID: UUID
     var playhead: TimeInterval
     var mediaRoot: URL
+    @EnvironmentObject private var store: EpisodeStore
+    @State private var enhanceError: String?
 
     private var clip: Clip? { episode.clip(id: clipID) }
 
@@ -13,9 +15,10 @@ struct InspectorPanel: View {
             if let clip {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 16) {
-                        Text("Seçili: \(clip.name)")
+                        TextField("Klip adı", text: nameBinding(clip))
                             .font(.system(size: 18, weight: .semibold))
                             .foregroundStyle(BoothTheme.text)
+                            .textFieldStyle(.plain)
 
                         metric("Başlangıç", TimeCode.format(clip.startOnTimeline))
                         metric("Süre", TimeCode.format(clip.duration))
@@ -59,11 +62,30 @@ struct InspectorPanel: View {
                         }
 
                         HStack {
-                            Button("Böl") { episode.splitClip(clip.id, at: playhead) }
+                            Button("Böl") {
+                                store.checkpoint(episode)
+                                episode.splitClip(clip.id, at: playhead)
+                            }
                                 .buttonStyle(BoothButtonStyle(fill: BoothTheme.elevated, foreground: BoothTheme.text))
-                            Button("Sil", role: .destructive) { episode.removeClip(clip.id) }
+                            Button("Sil", role: .destructive) {
+                                store.checkpoint(episode)
+                                episode.removeClip(clip.id)
+                            }
                                 .buttonStyle(BoothButtonStyle(fill: BoothTheme.accent.opacity(0.2), foreground: BoothTheme.accent))
                         }
+                        Button("Ripple sil") {
+                            store.checkpoint(episode)
+                            episode.removeClip(clip.id, ripple: true)
+                        }
+                        .buttonStyle(BoothButtonStyle(fill: BoothTheme.elevated, foreground: BoothTheme.text))
+                        Button("Sessizliği oy") {
+                            stripSilence(clip)
+                        }
+                        .buttonStyle(BoothButtonStyle(fill: BoothTheme.elevated, foreground: BoothTheme.text))
+
+                        Toggle("A/B orijinal", isOn: effectBinding(clip, \.bypassEffects))
+                            .foregroundStyle(BoothTheme.text)
+                            .tint(BoothTheme.accent)
 
                         Divider().background(BoothTheme.hairline)
                         Text("Efektler").font(.system(size: 16, weight: .semibold)).foregroundStyle(BoothTheme.text)
@@ -101,6 +123,17 @@ struct InspectorPanel: View {
                     .font(.system(size: 12))
                     .foregroundStyle(BoothTheme.secondary)
                 labeledSlider("Miktar", value: effectBinding(clip, \.isolatorAmount), range: 0...1)
+                Button(clip.enhancedFilename == nil ? "Temizle (gelişmiş izolasyon)" : "Temiz kopya var") {
+                    enhance(clip)
+                }
+                .buttonStyle(BoothButtonStyle(fill: BoothTheme.elevated, foreground: BoothTheme.text))
+                .disabled(clip.enhancedFilename != nil)
+            }
+            toggleRow("High-pass", isOn: effectBinding(clip, \.highPassEnabled)) {
+                labeledSlider("Kesim Hz", value: effectBinding(clip, \.highPassHz), range: 40...180)
+            }
+            toggleRow("De-esser", isOn: effectBinding(clip, \.deEssEnabled)) {
+                labeledSlider("Miktar", value: effectBinding(clip, \.deEssAmount), range: 0...1)
             }
             toggleRow("EQ", isOn: effectBinding(clip, \.eqEnabled)) {
                 Picker("EQ", selection: eqPresetBinding(clip)) {
@@ -131,7 +164,55 @@ struct InspectorPanel: View {
                 .pickerStyle(.segmented)
                 labeledSlider("Makeup", value: effectBinding(clip, \.makeupGainDB), range: 0...6)
             }
+
+            mixCard
+            markersCard
         }
+    }
+
+    private var mixCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Mix").font(.system(size: 16, weight: .semibold)).foregroundStyle(BoothTheme.text)
+            Toggle("Müzik ducking", isOn: $episode.mix.duckingEnabled)
+            if episode.mix.duckingEnabled {
+                labeledSlider("Ducking", value: $episode.mix.duckingAmount, range: 0...1)
+            }
+            Toggle("Auto-level konuşma", isOn: $episode.mix.autoLevelEnabled)
+            Toggle("Limiter", isOn: $episode.mix.limiterEnabled)
+            Toggle("Kayıtta Voice Isolation", isOn: $episode.mix.captureVoiceIsolation)
+            labeledSlider("Crossfade sn", value: Binding(
+                get: { episode.mix.crossfade },
+                set: { episode.mix.crossfade = $0 }
+            ), range: 0...0.2)
+        }
+        .foregroundStyle(BoothTheme.text)
+        .padding(12)
+        .background(BoothTheme.elevated, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    private var markersCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("İşaretler / Chapter").font(.system(size: 16, weight: .semibold)).foregroundStyle(BoothTheme.text)
+            ForEach($episode.markers) { $marker in
+                HStack {
+                    TextField("Ad", text: $marker.label)
+                        .textFieldStyle(.plain)
+                    Toggle("Ch", isOn: $marker.isChapter)
+                        .labelsHidden()
+                    Text(TimeCode.short(marker.time))
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(BoothTheme.secondary)
+                }
+            }
+            Button("Playhead’e işaret") {
+                store.checkpoint(episode)
+                episode.markers.append(Marker(time: playhead, label: "İşaret"))
+            }
+            .buttonStyle(BoothButtonStyle(fill: BoothTheme.elevated, foreground: BoothTheme.text))
+        }
+        .foregroundStyle(BoothTheme.text)
+        .padding(12)
+        .background(BoothTheme.elevated, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
     private func toggleRow<Content: View>(_ title: String, isOn: Binding<Bool>, @ViewBuilder content: () -> Content) -> some View {
@@ -180,6 +261,66 @@ struct InspectorPanel: View {
                 }
             }
         )
+    }
+
+    private func nameBinding(_ clip: Clip) -> Binding<String> {
+        Binding(
+            get: { clip.name },
+            set: { value in episode.updateClip(clip.id) { $0.name = value } }
+        )
+    }
+
+    private func stripSilence(_ clip: Clip) {
+        store.checkpoint(episode)
+        let url = mediaRoot.appendingPathComponent(clip.playbackFilename)
+        do {
+            let loaded = try SpectralEnhancer.loadMono(url: url)
+            let hop = max(32, Int(0.01 * loaded.sampleRate))
+            let levels = SpectralEnhancer.frameLevels(samples: loaded.samples, hop: hop)
+            let regions = MixMath.voicedRegions(
+                levels: levels,
+                sampleRate: loaded.sampleRate,
+                hop: hop,
+                threshold: 0.02,
+                minSilence: 0.35,
+                minKeep: 0.12
+            )
+            let local = regions.compactMap { region -> MixMath.Region? in
+                let start = max(region.start, clip.sourceOffset) - clip.sourceOffset
+                let end = min(region.end, clip.sourceOffset + clip.duration) - clip.sourceOffset
+                guard end - start > 0.08 else { return nil }
+                return MixMath.Region(start: start, duration: end - start)
+            }
+            if !local.isEmpty {
+                episode.replaceClip(clip.id, with: local)
+            }
+        } catch {
+            enhanceError = error.localizedDescription
+        }
+    }
+
+    private func enhance(_ clip: Clip) {
+        store.checkpoint(episode)
+        let source = mediaRoot.appendingPathComponent(clip.filename)
+        let filename = "clean-\(clip.id.uuidString.prefix(8)).caf"
+        let dest = mediaRoot.appendingPathComponent(filename)
+        do {
+            try SpectralEnhancer.enhanceFile(
+                at: source,
+                to: dest,
+                amount: clip.effects.isolatorAmount == 0 ? 0.75 : clip.effects.isolatorAmount,
+                lecture: clip.effects.isolatorPreset == .lecture
+            )
+            episode.updateClip(clip.id) {
+                $0.enhancedFilename = filename
+                $0.effects.spectralEnhance = true
+                if !$0.effects.isolatorPreset.isOn {
+                    $0.effects.isolatorPreset = .cleanVocals
+                }
+            }
+        } catch {
+            enhanceError = error.localizedDescription
+        }
     }
 
     private func trackMoveBinding(_ clip: Clip) -> Binding<UUID> {

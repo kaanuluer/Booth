@@ -5,6 +5,11 @@ import SwiftUI
 @MainActor
 final class EpisodeStore: ObservableObject {
     @Published var episodes: [Episode] = []
+    @Published private(set) var undoAvailable: [UUID: Bool] = [:]
+    @Published private(set) var redoAvailable: [UUID: Bool] = [:]
+
+    private var undoStacks: [UUID: [Episode]] = [:]
+    private var redoStacks: [UUID: [Episode]] = [:]
 
     private let fileManager = FileManager.default
 
@@ -117,6 +122,48 @@ final class EpisodeStore: ObservableObject {
         }
     }
 
+    func checkpoint(_ episode: Episode) {
+        var stack = undoStacks[episode.id] ?? []
+        if stack.last != episode {
+            stack.append(episode)
+            if stack.count > 40 { stack.removeFirst(stack.count - 40) }
+            undoStacks[episode.id] = stack
+            redoStacks[episode.id] = []
+            publishHistory(episode.id)
+        }
+    }
+
+    func undo(for id: UUID) -> Episode? {
+        guard var stack = undoStacks[id], let previous = stack.popLast() else { return nil }
+        undoStacks[id] = stack
+        if let current = episodes.first(where: { $0.id == id }) {
+            var redo = redoStacks[id] ?? []
+            redo.append(current)
+            redoStacks[id] = redo
+        }
+        publishHistory(id)
+        save(previous, persistImmediately: true)
+        return previous
+    }
+
+    func redo(for id: UUID) -> Episode? {
+        guard var stack = redoStacks[id], let next = stack.popLast() else { return nil }
+        redoStacks[id] = stack
+        if let current = episodes.first(where: { $0.id == id }) {
+            var undo = undoStacks[id] ?? []
+            undo.append(current)
+            undoStacks[id] = undo
+        }
+        publishHistory(id)
+        save(next, persistImmediately: true)
+        return next
+    }
+
+    private func publishHistory(_ id: UUID) {
+        undoAvailable[id] = !(undoStacks[id] ?? []).isEmpty
+        redoAvailable[id] = !(redoStacks[id] ?? []).isEmpty
+    }
+
     func suggestedTitle() -> String {
         String(format: "S01E%02d", episodes.count + 1)
     }
@@ -174,10 +221,7 @@ final class EpisodeStore: ObservableObject {
 
 enum AudioFileInfo {
     static func duration(url: URL) -> TimeInterval {
-        if let file = try? AVAudioFile(forReading: url) {
-            return Double(file.length) / file.processingFormat.sampleRate
-        }
-        let asset = AVURLAsset(url: url)
-        return CMTimeGetSeconds(asset.duration)
+        guard let file = try? AVAudioFile(forReading: url), file.processingFormat.sampleRate > 0 else { return 0 }
+        return Double(file.length) / file.processingFormat.sampleRate
     }
 }

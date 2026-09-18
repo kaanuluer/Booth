@@ -8,11 +8,13 @@ struct TimelineView: View {
     var snapEnabled: Bool
     var mediaRoot: URL
     var onSeek: (TimeInterval) -> Void
+    var onCheckpoint: () -> Void
 
     @State private var dragOrigins: [UUID: TimeInterval] = [:]
     @State private var draggingClipID: UUID?
     @State private var dragOffsetY: CGFloat = 0
     @State private var hoverTrackID: UUID?
+    @State private var trimOrigins: [UUID: (offset: TimeInterval, duration: TimeInterval, start: TimeInterval)] = [:]
 
     private let trackHeight: CGFloat = 88
     private let headerWidth: CGFloat = 92
@@ -33,6 +35,7 @@ struct TimelineView: View {
                     .frame(minWidth: width, minHeight: geo.size.height, alignment: .topLeading)
                     .overlay(alignment: .topLeading) {
                         playheadLine(height: geo.size.height)
+                        markersOverlay(width: width, height: geo.size.height)
                     }
                 }
             }
@@ -77,14 +80,23 @@ struct TimelineView: View {
                 }
                 HStack(spacing: 6) {
                     Button(track.wrappedValue.muted ? "M" : "M") {
+                        onCheckpoint()
                         track.wrappedValue.muted.toggle()
                     }
                     .font(.system(size: 11, weight: .bold))
                     .foregroundStyle(track.wrappedValue.muted ? BoothTheme.accent : BoothTheme.secondary)
-                    Button("S") { track.wrappedValue.solo.toggle() }
+                    Button("S") {
+                        onCheckpoint()
+                        track.wrappedValue.solo.toggle()
+                    }
                         .font(.system(size: 11, weight: .bold))
                         .foregroundStyle(track.wrappedValue.solo ? BoothTheme.music : BoothTheme.secondary)
                 }
+                Slider(value: Binding(
+                    get: { track.wrappedValue.volume },
+                    set: { track.wrappedValue.volume = $0 }
+                ), in: 0...1.5)
+                .tint(BoothTheme.trackColor(track.wrappedValue.kind))
             }
             .padding(8)
             .frame(width: headerWidth, height: trackHeight, alignment: .topLeading)
@@ -114,7 +126,7 @@ struct TimelineView: View {
         let dragging = draggingClipID == clip.id
         let previewKind = dragging ? (episode.tracks.first(where: { $0.id == hoverTrackID })?.kind ?? track.kind) : track.kind
         let trackColor = BoothTheme.trackColor(previewKind)
-        return FileWaveform(url: mediaRoot.appendingPathComponent(clip.filename), color: trackColor)
+        return FileWaveform(url: mediaRoot.appendingPathComponent(clip.playbackFilename), color: trackColor)
             .overlay(alignment: .topLeading) {
                 Text(clip.name)
                     .font(.system(size: 11, weight: .semibold))
@@ -129,6 +141,12 @@ struct TimelineView: View {
                     .strokeBorder(selected || dragging ? Color.white : trackColor.opacity(0.7), lineWidth: selected || dragging ? 2 : 1)
             )
             .shadow(color: dragging ? .black.opacity(0.45) : .clear, radius: 12, y: 6)
+            .overlay(alignment: .leading) {
+                trimHandle(clip: clip, edge: .start)
+            }
+            .overlay(alignment: .trailing) {
+                trimHandle(clip: clip, edge: .end)
+            }
             .offset(x: x, y: 8 + (dragging ? dragOffsetY : 0))
             .zIndex(dragging ? 50 : 0)
             .gesture(
@@ -142,16 +160,27 @@ struct TimelineView: View {
             )
             .onTapGesture { selectedClipID = clip.id }
             .contextMenu {
-                Button("Böl") { episode.splitClip(clip.id, at: playhead) }
+                Button("Böl") {
+                    onCheckpoint()
+                    episode.splitClip(clip.id, at: playhead)
+                }
                 Menu("Katmana taşı") {
                     ForEach(episode.tracks) { destination in
                         Button(destination.name) {
+                            onCheckpoint()
                             episode.moveClip(clip.id, to: destination.id)
                         }
                         .disabled(destination.id == track.id)
                     }
                 }
-                Button("Sil", role: .destructive) { episode.removeClip(clip.id) }
+                Button("Sil", role: .destructive) {
+                    onCheckpoint()
+                    episode.removeClip(clip.id)
+                }
+                Button("Ripple sil", role: .destructive) {
+                    onCheckpoint()
+                    episode.removeClip(clip.id, ripple: true)
+                }
             }
     }
 
@@ -160,6 +189,7 @@ struct TimelineView: View {
         draggingClipID = clip.id
         dragOffsetY = translation.height
         if dragOrigins[clip.id] == nil {
+            onCheckpoint()
             dragOrigins[clip.id] = clip.startOnTimeline
         }
         let origin = dragOrigins[clip.id] ?? clip.startOnTimeline
@@ -227,6 +257,53 @@ struct TimelineView: View {
             .frame(width: 2, height: height)
             .offset(x: headerWidth + CGFloat(playhead) * pixelsPerSecond)
             .allowsHitTesting(false)
+    }
+
+    private func markersOverlay(width: CGFloat, height: CGFloat) -> some View {
+        ZStack(alignment: .topLeading) {
+            ForEach(episode.markers) { marker in
+                Rectangle()
+                    .fill(marker.isChapter ? BoothTheme.music : BoothTheme.accent)
+                    .frame(width: 2, height: height)
+                    .offset(x: headerWidth + CGFloat(marker.time) * pixelsPerSecond)
+                    .overlay(alignment: .top) {
+                        Text(marker.label)
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(BoothTheme.text)
+                            .offset(x: 6, y: 2)
+                    }
+            }
+        }
+        .frame(width: width, height: height, alignment: .topLeading)
+        .allowsHitTesting(false)
+    }
+
+    private func trimHandle(clip: Clip, edge: TrimEdge) -> some View {
+        Rectangle()
+            .fill(Color.white.opacity(0.85))
+            .frame(width: 8, height: trackHeight - 24)
+            .gesture(
+                DragGesture(minimumDistance: 1)
+                    .onChanged { value in
+                        selectedClipID = clip.id
+                        if trimOrigins[clip.id] == nil {
+                            onCheckpoint()
+                            trimOrigins[clip.id] = (clip.sourceOffset, clip.duration, clip.startOnTimeline)
+                        }
+                        guard let origin = trimOrigins[clip.id] else { return }
+                        episode.updateClip(clip.id) { current in
+                            current.sourceOffset = origin.offset
+                            current.duration = origin.duration
+                            current.startOnTimeline = origin.start
+                        }
+                        let delta = TimeInterval(value.translation.width / pixelsPerSecond)
+                        let snapped = snapEnabled ? (delta * 10).rounded() / 10 : delta
+                        episode.trimClip(clip.id, edge: edge, delta: snapped)
+                    }
+                    .onEnded { _ in
+                        trimOrigins[clip.id] = nil
+                    }
+            )
     }
 
     private var seekGesture: some Gesture {

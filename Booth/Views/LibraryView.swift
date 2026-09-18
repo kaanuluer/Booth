@@ -9,6 +9,8 @@ struct LibraryView: View {
     @State private var showRename = false
     @State private var draftTitle = ""
     @State private var renaming: Episode?
+    @State private var deleting: Episode?
+    @State private var showDelete = false
 
     enum Filter: String, CaseIterable, Identifiable {
         case all = "Tümü"
@@ -53,6 +55,15 @@ struct LibraryView: View {
                 TextField("Bölüm adı", text: $draftTitle)
                 Button("Kaydet") { commitRename() }
                 Button("Vazgeç", role: .cancel) { renaming = nil }
+            }
+            .alert("Bölümü sil", isPresented: $showDelete) {
+                Button("Sil", role: .destructive) {
+                    if let deleting { store.delete(deleting) }
+                    self.deleting = nil
+                }
+                Button("Vazgeç", role: .cancel) { deleting = nil }
+            } message: {
+                Text("Bu bölüm ve ses dosyaları silinir.")
             }
         }
     }
@@ -134,7 +145,11 @@ struct LibraryView: View {
                         EpisodeCard(
                             episode: episode,
                             onOpen: { path.append(episode.id) },
-                            onRename: { beginRename(episode) }
+                            onRename: { beginRename(episode) },
+                            onDelete: {
+                                deleting = episode
+                                showDelete = true
+                            }
                         )
                     }
                     newCard
@@ -201,6 +216,7 @@ struct EpisodeCard: View {
     let episode: Episode
     var onOpen: () -> Void
     var onRename: () -> Void
+    var onDelete: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -263,6 +279,7 @@ struct EpisodeCard: View {
         .contextMenu {
             Button("Aç", action: onOpen)
             Button("Yeniden adlandır", action: onRename)
+            Button("Sil", role: .destructive, action: onDelete)
         }
     }
 

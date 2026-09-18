@@ -1,4 +1,6 @@
 import SwiftUI
+import PhotosUI
+import UIKit
 
 struct ExportSheet: View {
     @Binding var episode: Episode
@@ -14,6 +16,7 @@ struct ExportSheet: View {
     @State private var exportedURL: URL?
     @State private var showShare = false
     @State private var errorMessage: String?
+    @State private var artworkItem: PhotosPickerItem?
 
     var body: some View {
         NavigationStack {
@@ -26,7 +29,7 @@ struct ExportSheet: View {
                     metric("Klip", "\(episode.clipCount)")
                     if let report {
                         metric("LUFS", String(format: "%.1f", report.lufs))
-                        metric("Peak", String(format: "%.2f", report.peak))
+                        metric("TP", String(format: "%.2f", report.truePeak))
                     }
                 }
 
@@ -40,6 +43,43 @@ struct ExportSheet: View {
                 Toggle("Podcast seviyesi (-16 LUFS)", isOn: $normalize)
                     .tint(BoothTheme.accent)
                     .foregroundStyle(BoothTheme.text)
+                Toggle("Ducking", isOn: $episode.mix.duckingEnabled)
+                    .tint(BoothTheme.accent)
+                    .foregroundStyle(BoothTheme.text)
+                Toggle("Auto-level", isOn: $episode.mix.autoLevelEnabled)
+                    .tint(BoothTheme.accent)
+                    .foregroundStyle(BoothTheme.text)
+                Toggle("Limiter", isOn: $episode.mix.limiterEnabled)
+                    .tint(BoothTheme.accent)
+                    .foregroundStyle(BoothTheme.text)
+
+                HStack {
+                    Picker("Intro", selection: $episode.introAssetID) {
+                        Text("Intro yok").tag(Optional<UUID>.none)
+                        ForEach(episode.library) { asset in
+                            Text(asset.displayName).tag(Optional(asset.id))
+                        }
+                    }
+                    Picker("Outro", selection: $episode.outroAssetID) {
+                        Text("Outro yok").tag(Optional<UUID>.none)
+                        ForEach(episode.library) { asset in
+                            Text(asset.displayName).tag(Optional(asset.id))
+                        }
+                    }
+                }
+                .foregroundStyle(BoothTheme.text)
+                Button("Şablonu timeline’a yerleştir") {
+                    store.checkpoint(episode)
+                    episode.applyShowTemplate()
+                }
+                .buttonStyle(BoothButtonStyle(fill: BoothTheme.elevated, foreground: BoothTheme.text))
+
+                PhotosPicker(selection: $artworkItem, matching: .images) {
+                    Label(episode.artworkFilename == nil ? "Kapak ekle" : "Kapak seçildi", systemImage: "photo")
+                }
+                .onChange(of: artworkItem) { _, item in
+                    Task { await importArtwork(item) }
+                }
 
                 TextField("Dosya adı", text: $filename)
                     .textFieldStyle(.roundedBorder)
@@ -117,22 +157,33 @@ struct ExportSheet: View {
         let dest = FileManager.default.temporaryDirectory.appendingPathComponent(sanitized(filename))
         let snapshot = episode
         let mediaRoot = store.mediaDirectory(episode)
+        let exportFormat = format
+        let shouldNormalize = normalize
         do {
             let result = try await Task.detached(priority: .userInitiated) {
                 try OfflineExporter.export(
                     episode: snapshot,
                     mediaRoot: mediaRoot,
                     destination: dest,
-                    format: format,
-                    normalize: normalize
+                    format: exportFormat,
+                    normalize: shouldNormalize
                 ) { value in
                     Task { @MainActor in
-                        progress = value
+                        progress = min(0.9, max(0.05, value))
                     }
                 }
             }.value
             report = result
             exportedURL = dest
+            if format == .aac {
+                let artwork = episode.artworkFilename.flatMap { UIImage(contentsOfFile: store.mediaURL(for: snapshot, filename: $0).path) }
+                await MediaMetadata.write(
+                    to: dest,
+                    title: snapshot.title,
+                    artwork: artwork,
+                    chapters: snapshot.markers
+                )
+            }
             episode.status = .ready
             store.save(episode)
             isExporting = false
@@ -142,5 +193,14 @@ struct ExportSheet: View {
             isExporting = false
             errorMessage = error.localizedDescription
         }
+    }
+
+    private func importArtwork(_ item: PhotosPickerItem?) async {
+        guard let item, let data = try? await item.loadTransferable(type: Data.self) else { return }
+        let filename = "artwork.jpg"
+        let dest = store.mediaURL(for: episode, filename: filename)
+        try? data.write(to: dest)
+        episode.artworkFilename = filename
+        store.save(episode)
     }
 }
