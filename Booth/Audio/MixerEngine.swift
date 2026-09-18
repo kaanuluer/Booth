@@ -28,7 +28,7 @@ final class MixerEngine: ObservableObject {
         do {
             try AudioSession.configure(record: false)
         } catch {
-            print("session \(error)")
+            print("session error")
         }
 
         episodeDuration = max(episode.contentDuration, playhead + 0.1)
@@ -40,8 +40,8 @@ final class MixerEngine: ObservableObject {
             if anySolo && !track.solo { continue }
             for clip in track.clips {
                 guard clip.endTime > playhead else { continue }
-                let url = mediaRoot.appendingPathComponent(clip.playbackFilename)
-                guard FileManager.default.fileExists(atPath: url.path),
+                guard let url = mediaRoot.boothFile(clip.playbackFilename),
+                      FileManager.default.fileExists(atPath: url.path),
                       let file = try? AVAudioFile(forReading: url) else { continue }
                 attach(clip: clip, track: track, episode: episode, file: file, delayCompensation: now)
             }
@@ -64,7 +64,7 @@ final class MixerEngine: ObservableObject {
         do {
             try engine.start()
         } catch {
-            print("engine start \(error)")
+            print("engine start error")
             return
         }
 
@@ -104,10 +104,12 @@ final class MixerEngine: ObservableObject {
         displayTimer?.invalidate()
         let origin = CACurrentMediaTime()
         let start = playhead
-        displayTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
+        displayTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 12.0, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 guard let self, self.isPlaying else { return }
-                self.playhead = start + (CACurrentMediaTime() - origin)
+                let next = start + (CACurrentMediaTime() - origin)
+                if abs(next - self.playhead) < 0.04 { return }
+                self.playhead = next
                 if self.playhead >= self.episodeDuration {
                     self.playhead = self.episodeDuration
                     self.stop()

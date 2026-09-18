@@ -161,6 +161,7 @@ enum OfflineExporter {
         try visitChunks(applyGain: gain, voiceGain: voiceGain) { buffer in
             try outFile.write(from: buffer)
         }
+        MediaPath.protect(destination)
 
         let rms = Float(sqrt(squareSum / Double(max(sampleCount, 1))))
         let lufs = 20 * log10(max(rms, 0.00001))
@@ -213,8 +214,8 @@ enum OfflineExporter {
                             duck _: Float,
         isolatorStates: inout [UUID: VoiceIsolator.State]
     ) {
-        let url = mediaRoot.appendingPathComponent(clip.playbackFilename)
-        guard let file = try? AVAudioFile(forReading: url) else { return }
+        guard let url = mediaRoot.boothFile(clip.playbackFilename),
+              let file = try? AVAudioFile(forReading: url) else { return }
         let srcRate = file.processingFormat.sampleRate
         let channels = Int(file.processingFormat.channelCount)
 

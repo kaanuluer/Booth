@@ -112,7 +112,7 @@ struct EditorView: View {
                 episode.library.append(asset)
                 episode.placeAsset(asset, on: asset.kindHint, at: mixer.playhead)
             } catch {
-                print(error)
+                print("Booth import error")
             }
         }
         store.save(episode)
@@ -133,108 +133,115 @@ struct TransportBar: View {
     @EnvironmentObject private var store: EpisodeStore
 
     var body: some View {
-        HStack(spacing: 16) {
-            HStack(spacing: 8) {
-                Image(systemName: "pencil")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(BoothTheme.secondary)
-                TextField("Bölüm adı", text: $episode.title)
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(BoothTheme.text)
-                    .textFieldStyle(.plain)
-                    .textInputAutocapitalization(.sentences)
-                    .submitLabel(.done)
-                    .focused($titleFocused)
-                    .onSubmit { episode.rename(to: episode.title) }
-                    .onChange(of: titleFocused) { _, focused in
-                        if !focused { episode.rename(to: episode.title) }
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                HStack(spacing: 8) {
+                    Image(systemName: "pencil")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(BoothTheme.secondary)
+                    TextField("Bölüm adı", text: $episode.title)
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(BoothTheme.text)
+                        .textFieldStyle(.plain)
+                        .textInputAutocapitalization(.sentences)
+                        .submitLabel(.done)
+                        .focused($titleFocused)
+                        .onSubmit { episode.rename(to: episode.title) }
+                        .onChange(of: titleFocused) { _, focused in
+                            if !focused { episode.rename(to: episode.title) }
+                        }
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .background(BoothTheme.elevated, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .frame(maxWidth: 240, alignment: .leading)
+
+                HStack(spacing: 8) {
+                    Button { mixer.skip(-15, episode: episode, mediaRoot: mediaRoot) } label: {
+                        Image(systemName: "gobackward.15")
                     }
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
-            .background(BoothTheme.elevated, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .frame(maxWidth: 280, alignment: .leading)
-
-            HStack(spacing: 10) {
-                Button { mixer.skip(-15, episode: episode, mediaRoot: mediaRoot) } label: {
-                    Image(systemName: "gobackward.15")
+                    Button { mixer.toggle(episode: episode, mediaRoot: mediaRoot) } label: {
+                        Image(systemName: mixer.isPlaying ? "pause.fill" : "play.fill")
+                            .font(.system(size: 17, weight: .bold))
+                            .frame(width: 40, height: 40)
+                            .background(BoothTheme.elevated, in: Circle())
+                    }
+                    Button { mixer.skip(15, episode: episode, mediaRoot: mediaRoot) } label: {
+                        Image(systemName: "goforward.15")
+                    }
                 }
-                Button { mixer.toggle(episode: episode, mediaRoot: mediaRoot) } label: {
-                    Image(systemName: mixer.isPlaying ? "pause.fill" : "play.fill")
-                        .font(.system(size: 18, weight: .bold))
-                        .frame(width: 44, height: 44)
-                        .background(BoothTheme.elevated, in: Circle())
-                }
-                Button { mixer.skip(15, episode: episode, mediaRoot: mediaRoot) } label: {
-                    Image(systemName: "goforward.15")
-                }
-            }
-            .foregroundStyle(BoothTheme.text)
-
-            Text("\(TimeCode.format(mixer.playhead))  /  \(TimeCode.format(episode.contentDuration))")
-                .font(.system(size: 15, weight: .medium, design: .monospaced))
                 .foregroundStyle(BoothTheme.text)
 
-            Button {
-                if let restored = store.undo(for: episode.id) {
-                    episode = restored
+                Text("\(TimeCode.format(mixer.playhead))  /  \(TimeCode.format(episode.contentDuration))")
+                    .font(.system(size: 14, weight: .medium, design: .monospaced))
+                    .foregroundStyle(BoothTheme.text)
+                    .monospacedDigit()
+
+                BoothIconButton(systemName: "arrow.uturn.backward", action: {
+                    if let restored = store.undo(for: episode.id) { episode = restored }
+                })
+                .disabled(!(store.undoAvailable[episode.id] ?? false))
+                .keyboardShortcut("z", modifiers: .command)
+
+                BoothIconButton(systemName: "arrow.uturn.forward", action: {
+                    if let restored = store.redo(for: episode.id) { episode = restored }
+                })
+                .disabled(!(store.redoAvailable[episode.id] ?? false))
+                .keyboardShortcut("z", modifiers: [.command, .shift])
+
+                Spacer(minLength: 8)
+
+                Button(action: onRecord) {
+                    Label("Kayıt", systemImage: "record.circle")
                 }
-            } label: {
-                Image(systemName: "arrow.uturn.backward")
-            }
-            .disabled(!(store.undoAvailable[episode.id] ?? false))
-            .keyboardShortcut("z", modifiers: .command)
+                .buttonStyle(BoothButtonStyle(compact: true))
 
-            Button {
-                if let restored = store.redo(for: episode.id) {
-                    episode = restored
+                Button(action: onPunch) {
+                    Label("Punch", systemImage: "arrow.uturn.left")
                 }
-            } label: {
-                Image(systemName: "arrow.uturn.forward")
+                .buttonStyle(BoothButtonStyle(fill: BoothTheme.elevated, foreground: BoothTheme.text, compact: true))
+
+                Button(action: onNotes) {
+                    Label("Notlar", systemImage: "text.alignleft")
+                }
+                .buttonStyle(BoothButtonStyle(fill: BoothTheme.elevated, foreground: BoothTheme.text, compact: true))
+
+                Button(action: onExport) {
+                    Label("Yayın", systemImage: "square.and.arrow.up")
+                }
+                .buttonStyle(BoothButtonStyle(fill: BoothTheme.success.opacity(0.85), compact: true))
             }
-            .disabled(!(store.redoAvailable[episode.id] ?? false))
-            .keyboardShortcut("z", modifiers: [.command, .shift])
 
-            Toggle("A/B", isOn: $episode.mix.bypassEffects)
-                .toggleStyle(.button)
-                .tint(episode.mix.bypassEffects ? BoothTheme.accent : BoothTheme.secondary)
-                .font(.system(size: 12, weight: .semibold))
-
-            Button {
-                snapEnabled.toggle()
-            } label: {
-                Label("Yapışma", systemImage: "point.3.connected.trianglepath.dotted")
+            HStack(spacing: 10) {
+                Toggle("A/B", isOn: $episode.mix.bypassEffects)
+                    .toggleStyle(.button)
+                    .tint(episode.mix.bypassEffects ? BoothTheme.accent : BoothTheme.secondary)
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(snapEnabled ? BoothTheme.voice : BoothTheme.secondary)
+
+                Button {
+                    snapEnabled.toggle()
+                } label: {
+                    Label("Yapışma", systemImage: "point.3.connected.trianglepath.dotted")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(snapEnabled ? BoothTheme.voice : BoothTheme.secondary)
+                }
+
+                HStack(spacing: 6) {
+                    Image(systemName: "minus.magnifyingglass")
+                        .foregroundStyle(BoothTheme.secondary)
+                        .font(.system(size: 11))
+                    Slider(value: $pixelsPerSecond, in: 16...90)
+                        .frame(width: 110)
+                    Image(systemName: "plus.magnifyingglass")
+                        .foregroundStyle(BoothTheme.secondary)
+                        .font(.system(size: 11))
+                }
+
+                Spacer()
             }
-
-            Slider(value: $pixelsPerSecond, in: 16...90)
-                .frame(width: 120)
-
-            Spacer()
-
-            Button(action: onRecord) {
-                Label("Kayıt", systemImage: "record.circle")
-            }
-            .buttonStyle(BoothButtonStyle())
-
-            Button(action: onPunch) {
-                Label("Punch-in", systemImage: "arrow.uturn.left")
-            }
-            .buttonStyle(BoothButtonStyle(fill: BoothTheme.elevated, foreground: BoothTheme.text))
-
-            Button(action: onNotes) {
-                Label("Notlar", systemImage: "text.alignleft")
-            }
-            .buttonStyle(BoothButtonStyle(fill: BoothTheme.elevated, foreground: BoothTheme.text))
-
-            Button(action: onExport) {
-                Label("Yayına hazırla", systemImage: "square.and.arrow.up")
-            }
-            .buttonStyle(BoothButtonStyle(fill: BoothTheme.success.opacity(0.85)))
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 12)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
         .background(BoothTheme.surface)
     }
 }
@@ -248,10 +255,10 @@ struct ClipLibraryPanel: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Klipler")
-                .font(.system(size: 18, weight: .semibold))
+                .font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(BoothTheme.text)
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 16) {
+                LazyVStack(alignment: .leading, spacing: 12) {
                     ForEach(TrackKind.allCases.filter { $0 != .aux }, id: \.self) { kind in
                         let items = episode.library.filter { $0.kindHint == kind }
                         if !items.isEmpty {

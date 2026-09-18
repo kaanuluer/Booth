@@ -8,8 +8,17 @@
 	</array>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Booth, konuşma kaydı için mikrofona ihtiyaç duyar.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>Booth, konuşmayı transkripte çevirmek ve filler kesmek için konuşma tanımayı kullanır.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Booth, bölüm kapağı için fotoğraf kütüphanesinden görsel seçer.</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<false/>
+	</dict>
 	<key>UIFileSharingEnabled</key>
 	<true/>
 	<key>LSSupportsOpeningDocumentsInPlace</key>

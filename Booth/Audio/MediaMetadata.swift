@@ -12,7 +12,8 @@ enum MediaMetadata {
         let asset = AVURLAsset(url: url)
         guard let session = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetPassthrough)
                 ?? AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetAppleM4A) else { return }
-        let dest = url.deletingLastPathComponent().appendingPathComponent("meta-\(url.lastPathComponent)")
+        let destName = MediaPath.sanitizeForWrite("meta-\(url.lastPathComponent)")
+        let dest = url.deletingLastPathComponent().appendingPathComponent(destName)
         try? FileManager.default.removeItem(at: dest)
 
         let fileType: AVFileType
@@ -40,6 +41,7 @@ enum MediaMetadata {
             guard FileManager.default.fileExists(atPath: dest.path) else { return }
             try FileManager.default.removeItem(at: url)
             try FileManager.default.moveItem(at: dest, to: url)
+            MediaPath.protect(url)
         } catch {
             try? FileManager.default.removeItem(at: dest)
         }

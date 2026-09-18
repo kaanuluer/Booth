@@ -76,7 +76,7 @@ struct TranscriptNotesView: View {
         let clips = episode.tracks.filter { $0.kind == .voice }.flatMap(\.clips)
         store.checkpoint(episode)
         for clip in clips {
-            let url = mediaRoot.appendingPathComponent(clip.playbackFilename)
+            guard let url = mediaRoot.boothFile(clip.playbackFilename) else { continue }
             do {
                 let result = try await SpeechTranscriber.transcribe(url: url)
                 episode.applyTranscript(clipID: clip.id, text: result.text, segments: result.segments)

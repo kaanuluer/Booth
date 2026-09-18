@@ -677,6 +677,28 @@ struct Episode: Identifiable, Codable, Hashable {
     mutating func touch() {
         updatedAt = Date()
     }
+
+    mutating func sanitizeMediaNames() {
+        for t in tracks.indices {
+            for c in tracks[t].clips.indices {
+                if let name = MediaPath.leafName(tracks[t].clips[c].filename) {
+                    tracks[t].clips[c].filename = name
+                }
+                if let enhanced = tracks[t].clips[c].enhancedFilename {
+                    tracks[t].clips[c].enhancedFilename = MediaPath.leafName(enhanced)
+                }
+            }
+        }
+        if let artworkFilename {
+            self.artworkFilename = MediaPath.leafName(artworkFilename)
+        }
+        library = library.compactMap { asset in
+            guard let name = MediaPath.leafName(asset.filename) else { return nil }
+            var next = asset
+            next.filename = name
+            return next
+        }
+    }
 }
 
 enum TrimEdge {

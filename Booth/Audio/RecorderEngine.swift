@@ -32,6 +32,7 @@ final class RecorderEngine: ObservableObject {
     private var pausedDuration: TimeInterval = 0
     private var sampleRate: Double = 48_000
     private var writtenFrames: AVAudioFramePosition = 0
+    private var uiTick = 0
 
     func start(to url: URL, voiceIsolation: Bool) throws {
         stopGraph()
@@ -76,6 +77,7 @@ final class RecorderEngine: ObservableObject {
         duration = 0
         livePeaks = []
         writtenFrames = 0
+        uiTick = 0
         pausedDuration = 0
         startedAt = Date()
     }
@@ -113,6 +115,9 @@ final class RecorderEngine: ObservableObject {
     @discardableResult
     func stop() -> TimeInterval {
         let length = Double(writtenFrames) / max(sampleRate, 1)
+        if let url = file?.url {
+            MediaPath.protect(url)
+        }
         stopGraph()
         isRecording = false
         isPaused = false
@@ -144,12 +149,14 @@ final class RecorderEngine: ObservableObject {
             return
         }
         let rms = rms(of: buffer)
+        uiTick += 1
+        guard uiTick % 3 == 0 else { return }
         Task { @MainActor in
             self.level = rms
             self.duration = Double(self.writtenFrames) / max(self.sampleRate, 1)
             self.livePeaks.append(rms)
-            if self.livePeaks.count > 240 {
-                self.livePeaks.removeFirst(self.livePeaks.count - 240)
+            if self.livePeaks.count > 160 {
+                self.livePeaks.removeFirst(self.livePeaks.count - 160)
             }
         }
     }

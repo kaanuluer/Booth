@@ -63,9 +63,7 @@ enum SpeechTranscriber {
         let request = SFSpeechURLRecognitionRequest(url: url)
         request.shouldReportPartialResults = false
         #if !targetEnvironment(simulator)
-        if recognizer.supportsOnDeviceRecognition {
-            request.requiresOnDeviceRecognition = true
-        }
+        request.requiresOnDeviceRecognition = true
         #endif
 
         return try await withCheckedThrowingContinuation { continuation in

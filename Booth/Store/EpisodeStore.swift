@@ -72,14 +72,18 @@ final class EpisodeStore: ObservableObject {
             return nil
         }
         _ = url.startAccessingSecurityScopedResource()
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory), isDirectory.boolValue else {
+            return nil
+        }
         return url
     }
 
     static func mediaURL(episodeID: UUID, filename: String) -> URL {
-        rootURL
+        let media = rootURL
             .appendingPathComponent(episodeID.uuidString, isDirectory: true)
             .appendingPathComponent("media", isDirectory: true)
-            .appendingPathComponent(filename)
+        return MediaPath.resolve(root: media, filename: filename) ?? media.appendingPathComponent("invalid.m4a")
     }
 
     init() {
@@ -91,6 +95,10 @@ final class EpisodeStore: ObservableObject {
     func setSyncFolder(_ url: URL) throws {
         let accessed = url.startAccessingSecurityScopedResource()
         defer { if accessed { url.stopAccessingSecurityScopedResource() } }
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory), isDirectory.boolValue else {
+            throw CocoaError(.fileNoSuchFile)
+        }
         let data = try url.bookmarkData(options: [], includingResourceValuesForKeys: nil, relativeTo: nil)
         UserDefaults.standard.set(data, forKey: Self.syncBookmarkKey)
         usingCloudFolder = true
@@ -101,11 +109,14 @@ final class EpisodeStore: ObservableObject {
         guard let destRoot = Self.bookmarkedFolder() ?? FileManager.default.url(forUbiquityContainerIdentifier: nil)?
             .appendingPathComponent("Documents/Booth", isDirectory: true) else { return }
         try? fileManager.createDirectory(at: destRoot, withIntermediateDirectories: true)
-        let dest = destRoot.appendingPathComponent(episode.id.uuidString, isDirectory: true)
-        let source = episodeDirectory(episode)
-        if dest.standardizedFileURL == source.standardizedFileURL { return }
+        let root = destRoot.standardizedFileURL
+        let dest = root.appendingPathComponent(episode.id.uuidString, isDirectory: true).standardizedFileURL
+        guard MediaPath.isInside(dest, root: root) else { return }
+        let source = episodeDirectory(episode).standardizedFileURL
+        if dest == source { return }
         try? fileManager.removeItem(at: dest)
         try? fileManager.copyItem(at: source, to: dest)
+        MediaPath.protect(dest)
     }
 
     func episodeDirectory(_ episode: Episode) -> URL {
@@ -125,7 +136,8 @@ final class EpisodeStore: ObservableObject {
     }
 
     func mediaURL(for episode: Episode, filename: String) -> URL {
-        mediaDirectory(episode).appendingPathComponent(filename)
+        MediaPath.resolve(root: mediaDirectory(episode), filename: filename)
+            ?? mediaDirectory(episode).appendingPathComponent("invalid.m4a")
     }
 
     func load() {
@@ -134,13 +146,15 @@ final class EpisodeStore: ObservableObject {
             return
         }
         var loaded: [Episode] = []
-        for folder in ids where folder.hasDirectoryPath {
+        for folder in ids {
+            guard UUID(uuidString: folder.lastPathComponent) != nil else { continue }
             let json = folder.appendingPathComponent("episode.json")
             if fileManager.isUbiquitousItem(at: json) {
                 try? fileManager.startDownloadingUbiquitousItem(at: json)
             }
             guard let data = try? Data(contentsOf: json),
-                  let episode = try? JSONDecoder().decode(Episode.self, from: data) else { continue }
+                  var episode = try? JSONDecoder().decode(Episode.self, from: data) else { continue }
+            episode.sanitizeMediaNames()
             loaded.append(episode)
         }
         episodes = loaded.sorted { $0.updatedAt > $1.updatedAt }
@@ -186,13 +200,15 @@ final class EpisodeStore: ObservableObject {
 
     private func writeToDisk(_ episode: Episode) {
         var snapshot = episode
+        snapshot.sanitizeMediaNames()
         snapshot.touch()
         let url = episodeDirectory(episode).appendingPathComponent("episode.json")
         do {
             let data = try JSONEncoder().encode(snapshot)
-            try data.write(to: url, options: [.atomic])
+            try data.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+            MediaPath.protect(url)
         } catch {
-            print("Booth save error: \(error)")
+            print("Booth save error")
         }
     }
 
@@ -261,13 +277,13 @@ final class EpisodeStore: ObservableObject {
     }
 
     func uniqueFilename(in episode: Episode, preferred: String) -> String {
-        let ext = (preferred as NSString).pathExtension.isEmpty ? "m4a" : (preferred as NSString).pathExtension
-        let base = ((preferred as NSString).deletingPathExtension as NSString).lastPathComponent
-            .replacingOccurrences(of: " ", with: "-")
-        var name = "\(base).\(ext)"
+        let safe = MediaPath.sanitizeForWrite(preferred)
+        let ext = (safe as NSString).pathExtension
+        let base = (safe as NSString).deletingPathExtension
+        var name = safe
         var i = 2
         while fileManager.fileExists(atPath: mediaURL(for: episode, filename: name).path) {
-            name = "\(base)-\(i).\(ext)"
+            name = MediaPath.sanitizeForWrite("\(base)-\(i).\(ext)")
             i += 1
         }
         return name
@@ -283,6 +299,12 @@ final class EpisodeStore: ObservableObject {
             try fileManager.removeItem(at: dest)
         }
         try fileManager.copyItem(at: source, to: dest)
+        let mediaRoot = mediaDirectory(episode)
+        guard MediaPath.isInside(dest, root: mediaRoot), MediaPath.isRegularFile(dest) else {
+            try? fileManager.removeItem(at: dest)
+            throw CocoaError(.fileWriteUnknown)
+        }
+        MediaPath.protect(dest)
         let duration = AudioFileInfo.duration(url: dest)
         return MediaAsset(
             filename: filename,

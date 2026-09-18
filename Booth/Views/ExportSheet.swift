@@ -147,7 +147,7 @@ struct ExportSheet: View {
     }
 
     private func sanitized(_ name: String) -> String {
-        name.replacingOccurrences(of: "/", with: "-")
+        MediaPath.exportBasename(name, fileExtension: format.fileExtension)
     }
 
     @MainActor
@@ -173,6 +173,7 @@ struct ExportSheet: View {
                     }
                 }
             }.value
+            MediaPath.protect(dest)
             report = result
             exportedURL = dest
             if format == .aac {
@@ -183,11 +184,16 @@ struct ExportSheet: View {
                     artwork: artwork,
                     chapters: snapshot.markers
                 )
+                MediaPath.protect(dest)
             }
             episode.status = .ready
             if !snapshot.showNotes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 let notesURL = dest.deletingPathExtension().appendingPathExtension("txt")
-                try? snapshot.showNotes.data(using: .utf8)?.write(to: notesURL)
+                try? snapshot.showNotes.data(using: .utf8)?.write(
+                    to: notesURL,
+                    options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication]
+                )
+                MediaPath.protect(notesURL)
             }
             store.save(episode)
             if store.usingCloudFolder {
@@ -206,7 +212,8 @@ struct ExportSheet: View {
         guard let item, let data = try? await item.loadTransferable(type: Data.self) else { return }
         let filename = "artwork.jpg"
         let dest = store.mediaURL(for: episode, filename: filename)
-        try? data.write(to: dest)
+        try? data.write(to: dest, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        MediaPath.protect(dest)
         episode.artworkFilename = filename
         store.save(episode)
     }

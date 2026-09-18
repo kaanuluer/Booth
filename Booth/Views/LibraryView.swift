@@ -81,11 +81,8 @@ struct LibraryView: View {
             Text("B")
                 .font(.system(size: 22, weight: .bold, design: .rounded))
                 .foregroundStyle(BoothTheme.text)
-                .frame(width: 40, height: 40)
-                .background(BoothTheme.accent, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            navIcon("square.stack", selected: true)
-            navIcon("mic", selected: false)
-            navIcon("gearshape", selected: false)
+                .frame(width: 44, height: 44)
+                .background(BoothTheme.accent, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             Spacer()
         }
         .padding(.vertical, 24)
@@ -93,22 +90,15 @@ struct LibraryView: View {
         .background(BoothTheme.surface)
     }
 
-    private func navIcon(_ name: String, selected: Bool) -> some View {
-        Image(systemName: name)
-            .font(.system(size: 18, weight: .semibold))
-            .foregroundStyle(selected ? BoothTheme.text : BoothTheme.secondary)
-            .frame(width: 44, height: 44)
-            .background(selected ? BoothTheme.elevated : Color.clear, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-    }
-
     private var content: some View {
         VStack(alignment: .leading, spacing: 20) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Bölümler")
-                        .font(.system(size: 32, weight: .semibold))
+                        .font(.system(size: 34, weight: .semibold))
                         .foregroundStyle(BoothTheme.text)
                     Text("Kaydet, yerleştir, yayına hazırla.")
+                        .font(.system(size: 16))
                         .foregroundStyle(BoothTheme.secondary)
                 }
                 Spacer()
@@ -155,7 +145,7 @@ struct LibraryView: View {
             }
 
             ScrollView {
-                LazyVGrid(columns: [GridItem(.flexible(), spacing: 16), GridItem(.flexible(), spacing: 16)], spacing: 16) {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 280), spacing: 16)], spacing: 16) {
                     ForEach(filtered) { episode in
                         EpisodeCard(
                             episode: episode,
@@ -202,7 +192,7 @@ struct LibraryView: View {
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: 240)
             }
-            .frame(maxWidth: .infinity, minHeight: 240)
+            .frame(maxWidth: .infinity, minHeight: 200)
             .overlay(
                 RoundedRectangle(cornerRadius: 20, style: .continuous)
                     .strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: [7, 6]))
@@ -249,7 +239,8 @@ struct EpisodeCard: View {
                 if let clip = episode.tracks.first(where: { $0.kind == .voice })?.clips.first {
                     FileWaveform(
                         url: EpisodeStore.mediaURL(episodeID: episode.id, filename: clip.filename),
-                        color: BoothTheme.voice
+                        color: BoothTheme.voice,
+                        barCount: 48
                     )
                     .padding(16)
                 } else {
@@ -257,7 +248,7 @@ struct EpisodeCard: View {
                         .padding(16)
                 }
             }
-            .frame(height: 140)
+            .frame(height: 112)
             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
 
             HStack {

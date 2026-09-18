@@ -14,7 +14,7 @@ struct InspectorPanel: View {
         Group {
             if let clip {
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 12) {
                         TextField("Klip adı", text: nameBinding(clip))
                             .font(.system(size: 18, weight: .semibold))
                             .foregroundStyle(BoothTheme.text)
@@ -301,7 +301,7 @@ struct InspectorPanel: View {
 
     private func transcribe(_ clip: Clip) {
         enhanceError = nil
-        let url = mediaRoot.appendingPathComponent(clip.playbackFilename)
+        guard let url = mediaRoot.boothFile(clip.playbackFilename) else { return }
         Task {
             do {
                 let result = try await SpeechTranscriber.transcribe(url: url)
@@ -316,7 +316,7 @@ struct InspectorPanel: View {
 
     private func stripSilence(_ clip: Clip) {
         store.checkpoint(episode)
-        let url = mediaRoot.appendingPathComponent(clip.playbackFilename)
+        guard let url = mediaRoot.boothFile(clip.playbackFilename) else { return }
         do {
             let loaded = try SpectralEnhancer.loadMono(url: url)
             let hop = max(32, Int(0.01 * loaded.sampleRate))
@@ -345,9 +345,9 @@ struct InspectorPanel: View {
 
     private func enhance(_ clip: Clip) {
         store.checkpoint(episode)
-        let source = mediaRoot.appendingPathComponent(clip.filename)
         let filename = "clean-\(clip.id.uuidString.prefix(8)).caf"
-        let dest = mediaRoot.appendingPathComponent(filename)
+        guard let source = mediaRoot.boothFile(clip.filename),
+              let dest = mediaRoot.boothFile(filename) else { return }
         do {
             try SpectralEnhancer.enhanceFile(
                 at: source,
@@ -355,6 +355,7 @@ struct InspectorPanel: View {
                 amount: clip.effects.isolatorAmount == 0 ? 0.75 : clip.effects.isolatorAmount,
                 lecture: clip.effects.isolatorPreset == .lecture
             )
+            MediaPath.protect(dest)
             episode.updateClip(clip.id) {
                 $0.enhancedFilename = filename
                 $0.effects.spectralEnhance = true

@@ -12,12 +12,13 @@ struct TimelineView: View {
 
     @State private var dragOrigins: [UUID: TimeInterval] = [:]
     @State private var draggingClipID: UUID?
+    @State private var dragOffsetX: CGFloat = 0
     @State private var dragOffsetY: CGFloat = 0
     @State private var hoverTrackID: UUID?
     @State private var trimOrigins: [UUID: (offset: TimeInterval, duration: TimeInterval, start: TimeInterval)] = [:]
 
-    private let trackHeight: CGFloat = 88
-    private let headerWidth: CGFloat = 92
+    private let trackHeight: CGFloat = 84
+    private let headerWidth: CGFloat = 108
     private let rulerHeight: CGFloat = 36
     private let addLaneHeight: CGFloat = 52
     private let clipInset: CGFloat = 8
@@ -48,6 +49,7 @@ struct TimelineView: View {
                         .overlay(alignment: .topLeading) {
                             markersOverlay(width: contentWidth, height: rowsHeight)
                         }
+                        .animation(nil, value: playhead)
                     }
                     .frame(width: max(0, geo.size.width - headerWidth), height: rowsHeight, alignment: .top)
                     .contentMargins(.all, 0, for: .scrollContent)
@@ -94,18 +96,14 @@ struct TimelineView: View {
                     .lineLimit(1)
             }
             HStack(spacing: 6) {
-                Button("M") {
+                muteSoloButton("M", active: track.wrappedValue.muted, color: BoothTheme.accent) {
                     onCheckpoint()
                     track.wrappedValue.muted.toggle()
                 }
-                .font(.system(size: 11, weight: .bold))
-                .foregroundStyle(track.wrappedValue.muted ? BoothTheme.accent : BoothTheme.secondary)
-                Button("S") {
+                muteSoloButton("S", active: track.wrappedValue.solo, color: BoothTheme.music) {
                     onCheckpoint()
                     track.wrappedValue.solo.toggle()
                 }
-                .font(.system(size: 11, weight: .bold))
-                .foregroundStyle(track.wrappedValue.solo ? BoothTheme.music : BoothTheme.secondary)
             }
             volumeBar(track)
             panBar(track)
@@ -159,28 +157,36 @@ struct TimelineView: View {
         .frame(height: 8)
     }
 
-    private func ruler(width: CGFloat) -> some View {
-        ZStack(alignment: .topLeading) {
-            BoothTheme.surface
-            Path { path in
-                let seconds = Int(episode.timelineDuration)
-                for s in stride(from: 0, through: seconds, by: 5) {
-                    let x = CGFloat(s) * pixelsPerSecond
-                    path.move(to: CGPoint(x: x, y: 22))
-                    path.addLine(to: CGPoint(x: x, y: rulerHeight))
-                }
-            }
-            .stroke(BoothTheme.hairline, lineWidth: 1)
+    private func muteSoloButton(_ title: String, active: Bool, color: Color, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 11, weight: .bold))
+                .foregroundStyle(active ? color : BoothTheme.secondary)
+                .frame(width: 28, height: 24)
+                .background(active ? color.opacity(0.16) : BoothTheme.elevated, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+        }
+        .buttonStyle(.plain)
+    }
 
-            ForEach(Array(stride(from: 0, through: Int(episode.timelineDuration), by: 10)), id: \.self) { s in
-                Text(TimeCode.format(TimeInterval(s)))
+    private func ruler(width: CGFloat) -> some View {
+        Canvas { context, size in
+            context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(BoothTheme.surface))
+            let seconds = Int(episode.timelineDuration)
+            var ticks = Path()
+            for s in stride(from: 0, through: seconds, by: 5) {
+                let x = CGFloat(s) * pixelsPerSecond
+                ticks.move(to: CGPoint(x: x, y: s % 10 == 0 ? 16 : 22))
+                ticks.addLine(to: CGPoint(x: x, y: size.height))
+            }
+            context.stroke(ticks, with: .color(BoothTheme.hairline), lineWidth: 1)
+            for s in stride(from: 0, through: seconds, by: 10) {
+                let label = Text(TimeCode.format(TimeInterval(s)))
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundStyle(BoothTheme.secondary)
-                    .position(x: CGFloat(s) * pixelsPerSecond + 28, y: 12)
+                context.draw(label, at: CGPoint(x: CGFloat(s) * pixelsPerSecond + 4, y: 8), anchor: .topLeading)
             }
         }
         .frame(width: width, height: rulerHeight)
-        .clipped()
         .contentShape(Rectangle())
         .onTapGesture { location in
             let t = TimeInterval(location.x / pixelsPerSecond)
@@ -219,7 +225,9 @@ struct TimelineView: View {
         let dragging = draggingClipID == clip.id
         let previewKind = dragging ? (episode.tracks.first(where: { $0.id == hoverTrackID })?.kind ?? track.kind) : track.kind
         let trackColor = BoothTheme.trackColor(previewKind)
-        return FileWaveform(url: mediaRoot.appendingPathComponent(clip.playbackFilename), color: trackColor)
+        let fileURL = mediaRoot.boothFile(clip.playbackFilename)
+        let bars = min(120, max(24, Int(w / 4)))
+        return FileWaveform(url: fileURL, color: trackColor, barCount: bars)
             .frame(width: w, height: trackHeight - clipInset * 2)
             .background(trackColor.opacity(dragging ? 0.42 : 0.28), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             .overlay(alignment: .top) {
@@ -228,8 +236,8 @@ struct TimelineView: View {
                     .foregroundStyle(BoothTheme.text)
                     .padding(.horizontal, 6)
                     .lineLimit(1)
-                    .frame(width: w, height: 26, alignment: .leading)
-                    .background(Color.black.opacity(0.22))
+                    .frame(width: w, height: 22, alignment: .leading)
+                    .background(Color.black.opacity(0.28))
                     .contentShape(Rectangle())
                     .gesture(
                         DragGesture(minimumDistance: 4)
@@ -254,7 +262,7 @@ struct TimelineView: View {
                 trimHandle(clip: clip, edge: .end)
             }
             .frame(width: w, height: trackHeight - clipInset * 2)
-            .offset(x: x, y: clipInset + (dragging ? dragOffsetY : 0))
+            .offset(x: x + (dragging ? dragOffsetX : 0), y: clipInset + (dragging ? dragOffsetY : 0))
             .zIndex(dragging ? 50 : 0)
             .onTapGesture { selectedClipID = clip.id }
             .contextMenu {
@@ -285,16 +293,12 @@ struct TimelineView: View {
     private func beginDrag(_ clip: Clip, on track: Track, translation: CGSize) {
         selectedClipID = clip.id
         draggingClipID = clip.id
+        dragOffsetX = translation.width
         dragOffsetY = translation.height
         if dragOrigins[clip.id] == nil {
             onCheckpoint()
             dragOrigins[clip.id] = clip.startOnTimeline
         }
-        let origin = dragOrigins[clip.id] ?? clip.startOnTimeline
-        var next = origin + TimeInterval(translation.width / pixelsPerSecond)
-        next = max(0, next)
-        if snapEnabled { next = (next * 10).rounded() / 10 }
-        episode.updateClip(clip.id) { $0.startOnTimeline = next }
         if let source = episode.tracks.firstIndex(where: { $0.id == track.id }) {
             hoverTrackID = destinationTrack(from: source, translationY: translation.height)?.id
         }
@@ -304,6 +308,11 @@ struct TimelineView: View {
         var transaction = Transaction()
         transaction.disablesAnimations = true
         withTransaction(transaction) {
+            let origin = dragOrigins[clip.id] ?? clip.startOnTimeline
+            var next = origin + TimeInterval(translation.width / pixelsPerSecond)
+            next = max(0, next)
+            if snapEnabled { next = (next * 10).rounded() / 10 }
+            episode.updateClip(clip.id) { $0.startOnTimeline = next }
             if let source = episode.tracks.firstIndex(where: { $0.id == track.id }),
                let destination = destinationTrack(from: source, translationY: translation.height),
                destination.id != track.id {
@@ -311,6 +320,7 @@ struct TimelineView: View {
             }
             dragOrigins[clip.id] = nil
             draggingClipID = nil
+            dragOffsetX = 0
             dragOffsetY = 0
             hoverTrackID = nil
         }
@@ -344,7 +354,7 @@ struct TimelineView: View {
 
     private func playheadLine(height: CGFloat) -> some View {
         Rectangle()
-            .fill(BoothTheme.text)
+            .fill(BoothTheme.accent)
             .frame(width: 2, height: height)
             .offset(x: CGFloat(playhead) * pixelsPerSecond)
             .allowsHitTesting(false)
