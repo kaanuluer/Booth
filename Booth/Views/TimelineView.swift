@@ -10,6 +10,9 @@ struct TimelineView: View {
     var onSeek: (TimeInterval) -> Void
 
     @State private var dragOrigins: [UUID: TimeInterval] = [:]
+    @State private var draggingClipID: UUID?
+    @State private var dragOffsetY: CGFloat = 0
+    @State private var hoverTrackID: UUID?
 
     private let trackHeight: CGFloat = 88
     private let headerWidth: CGFloat = 92
@@ -23,6 +26,7 @@ struct TimelineView: View {
                         ruler(width: width)
                         ForEach($episode.tracks) { $track in
                             trackLane(track: $track, width: width)
+                                .zIndex(isDragging(from: track) ? 20 : 0)
                         }
                         addLane(width: width)
                     }
@@ -87,21 +91,29 @@ struct TimelineView: View {
             .background(BoothTheme.surface)
 
             ZStack(alignment: .leading) {
-                Rectangle().fill(BoothTheme.canvas)
+                RoundedRectangle(cornerRadius: 0)
+                    .fill(hoverTrackID == track.wrappedValue.id ? BoothTheme.trackColor(track.wrappedValue.kind).opacity(0.14) : BoothTheme.canvas)
+                if hoverTrackID == track.wrappedValue.id {
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .strokeBorder(BoothTheme.trackColor(track.wrappedValue.kind).opacity(0.85), style: StrokeStyle(lineWidth: 1.5, dash: [7, 5]))
+                        .padding(4)
+                }
                 ForEach(track.wrappedValue.clips) { clip in
-                    clipBlock(clip, trackColor: BoothTheme.trackColor(track.wrappedValue.kind))
+                    clipBlock(clip, track: track.wrappedValue)
                 }
             }
             .frame(width: width - headerWidth, height: trackHeight)
-            .clipped()
         }
         .overlay(alignment: .bottom) { Divider().background(BoothTheme.hairline) }
     }
 
-    private func clipBlock(_ clip: Clip, trackColor: Color) -> some View {
+    private func clipBlock(_ clip: Clip, track: Track) -> some View {
         let x = CGFloat(clip.startOnTimeline) * pixelsPerSecond
         let w = max(28, CGFloat(clip.duration) * pixelsPerSecond)
         let selected = selectedClipID == clip.id
+        let dragging = draggingClipID == clip.id
+        let previewKind = dragging ? (episode.tracks.first(where: { $0.id == hoverTrackID })?.kind ?? track.kind) : track.kind
+        let trackColor = BoothTheme.trackColor(previewKind)
         return FileWaveform(url: mediaRoot.appendingPathComponent(clip.filename), color: trackColor)
             .overlay(alignment: .topLeading) {
                 Text(clip.name)
@@ -111,34 +123,81 @@ struct TimelineView: View {
                     .lineLimit(1)
             }
             .frame(width: w, height: trackHeight - 16)
-            .background(trackColor.opacity(0.28), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .background(trackColor.opacity(dragging ? 0.42 : 0.28), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .strokeBorder(selected ? Color.white : trackColor.opacity(0.7), lineWidth: selected ? 2 : 1)
+                    .strokeBorder(selected || dragging ? Color.white : trackColor.opacity(0.7), lineWidth: selected || dragging ? 2 : 1)
             )
-            .offset(x: x, y: 8)
+            .shadow(color: dragging ? .black.opacity(0.45) : .clear, radius: 12, y: 6)
+            .offset(x: x, y: 8 + (dragging ? dragOffsetY : 0))
+            .zIndex(dragging ? 50 : 0)
             .gesture(
                 DragGesture(minimumDistance: 2)
                     .onChanged { value in
-                        selectedClipID = clip.id
-                        if dragOrigins[clip.id] == nil {
-                            dragOrigins[clip.id] = clip.startOnTimeline
-                        }
-                        let origin = dragOrigins[clip.id] ?? clip.startOnTimeline
-                        var next = origin + TimeInterval(value.translation.width / pixelsPerSecond)
-                        next = max(0, next)
-                        if snapEnabled { next = (next * 10).rounded() / 10 }
-                        episode.updateClip(clip.id) { $0.startOnTimeline = next }
+                        beginDrag(clip, on: track, translation: value.translation)
                     }
-                    .onEnded { _ in
-                        dragOrigins[clip.id] = nil
+                    .onEnded { value in
+                        finishDrag(clip, from: track, translation: value.translation)
                     }
             )
             .onTapGesture { selectedClipID = clip.id }
             .contextMenu {
                 Button("Böl") { episode.splitClip(clip.id, at: playhead) }
+                Menu("Katmana taşı") {
+                    ForEach(episode.tracks) { destination in
+                        Button(destination.name) {
+                            episode.moveClip(clip.id, to: destination.id)
+                        }
+                        .disabled(destination.id == track.id)
+                    }
+                }
                 Button("Sil", role: .destructive) { episode.removeClip(clip.id) }
             }
+    }
+
+    private func beginDrag(_ clip: Clip, on track: Track, translation: CGSize) {
+        selectedClipID = clip.id
+        draggingClipID = clip.id
+        dragOffsetY = translation.height
+        if dragOrigins[clip.id] == nil {
+            dragOrigins[clip.id] = clip.startOnTimeline
+        }
+        let origin = dragOrigins[clip.id] ?? clip.startOnTimeline
+        var next = origin + TimeInterval(translation.width / pixelsPerSecond)
+        next = max(0, next)
+        if snapEnabled { next = (next * 10).rounded() / 10 }
+        episode.updateClip(clip.id) { $0.startOnTimeline = next }
+        if let source = episode.tracks.firstIndex(where: { $0.id == track.id }) {
+            hoverTrackID = destinationTrack(from: source, translationY: translation.height)?.id
+        }
+    }
+
+    private func finishDrag(_ clip: Clip, from track: Track, translation: CGSize) {
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            if let source = episode.tracks.firstIndex(where: { $0.id == track.id }),
+               let destination = destinationTrack(from: source, translationY: translation.height),
+               destination.id != track.id {
+                episode.moveClip(clip.id, to: destination.id)
+            }
+            dragOrigins[clip.id] = nil
+            draggingClipID = nil
+            dragOffsetY = 0
+            hoverTrackID = nil
+        }
+    }
+
+    private func destinationTrack(from sourceIndex: Int, translationY: CGFloat) -> Track? {
+        guard !episode.tracks.isEmpty else { return nil }
+        let raw = sourceIndex + Int((translationY / trackHeight).rounded())
+        let index = min(max(0, raw), episode.tracks.count - 1)
+        return episode.tracks[index]
+    }
+
+    private func isDragging(from track: Track) -> Bool {
+        guard let draggingClipID else { return false }
+        return track.clips.contains { $0.id == draggingClipID }
     }
 
     private func addLane(width: CGFloat) -> some View {

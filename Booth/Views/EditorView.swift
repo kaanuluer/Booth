@@ -106,14 +106,30 @@ struct TransportBar: View {
     var mediaRoot: URL
     var onRecord: () -> Void
     var onExport: () -> Void
+    @FocusState private var titleFocused: Bool
 
     var body: some View {
         HStack(spacing: 16) {
-            Text(episode.title)
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(BoothTheme.text)
-                .lineLimit(1)
-                .frame(maxWidth: 240, alignment: .leading)
+            HStack(spacing: 8) {
+                Image(systemName: "pencil")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(BoothTheme.secondary)
+                TextField("Bölüm adı", text: $episode.title)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(BoothTheme.text)
+                    .textFieldStyle(.plain)
+                    .textInputAutocapitalization(.sentences)
+                    .submitLabel(.done)
+                    .focused($titleFocused)
+                    .onSubmit { episode.rename(to: episode.title) }
+                    .onChange(of: titleFocused) { _, focused in
+                        if !focused { episode.rename(to: episode.title) }
+                    }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(BoothTheme.elevated, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .frame(maxWidth: 280, alignment: .leading)
 
             HStack(spacing: 10) {
                 Button { mixer.skip(-15, episode: episode, mediaRoot: mediaRoot) } label: {

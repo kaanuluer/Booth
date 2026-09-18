@@ -313,6 +313,16 @@ struct Episode: Identifiable, Codable, Hashable {
         tracks.reduce(0) { $0 + $1.clips.count }
     }
 
+    static func normalizedTitle(_ raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "Adsız bölüm" : trimmed
+    }
+
+    mutating func rename(to raw: String) {
+        title = Self.normalizedTitle(raw)
+        touch()
+    }
+
     func clip(id: UUID) -> Clip? {
         tracks.flatMap(\.clips).first { $0.id == id }
     }
@@ -341,6 +351,29 @@ struct Episode: Identifiable, Codable, Hashable {
         guard let index = tracks.firstIndex(where: { $0.id == trackID }) else { return }
         tracks[index].clips.append(clip)
         tracks[index].clips.sort { $0.startOnTimeline < $1.startOnTimeline }
+        if status == .draft { status = .editing }
+        touch()
+    }
+
+    mutating func moveClip(_ id: UUID, to trackID: UUID, startOnTimeline: TimeInterval? = nil) {
+        guard let fromIndex = tracks.firstIndex(where: { $0.clips.contains { $0.id == id } }) else { return }
+        guard let toIndex = tracks.firstIndex(where: { $0.id == trackID }) else { return }
+        guard let clipIndex = tracks[fromIndex].clips.firstIndex(where: { $0.id == id }) else { return }
+
+        if fromIndex == toIndex {
+            if let start = startOnTimeline {
+                tracks[fromIndex].clips[clipIndex].startOnTimeline = max(0, start)
+                tracks[fromIndex].clips.sort { $0.startOnTimeline < $1.startOnTimeline }
+            }
+            return
+        }
+
+        var clip = tracks[fromIndex].clips.remove(at: clipIndex)
+        if let start = startOnTimeline {
+            clip.startOnTimeline = max(0, start)
+        }
+        tracks[toIndex].clips.append(clip)
+        tracks[toIndex].clips.sort { $0.startOnTimeline < $1.startOnTimeline }
         if status == .draft { status = .editing }
         touch()
     }

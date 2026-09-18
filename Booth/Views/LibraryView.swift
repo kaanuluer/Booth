@@ -5,6 +5,10 @@ struct LibraryView: View {
     @State private var query = ""
     @State private var filter: Filter = .all
     @State private var path: [UUID] = []
+    @State private var showCreate = false
+    @State private var showRename = false
+    @State private var draftTitle = ""
+    @State private var renaming: Episode?
 
     enum Filter: String, CaseIterable, Identifiable {
         case all = "Tümü"
@@ -37,6 +41,18 @@ struct LibraryView: View {
             }
             .navigationDestination(for: UUID.self) { id in
                 EditorView(episode: store.binding(for: id))
+            }
+            .alert("Yeni bölüm", isPresented: $showCreate) {
+                TextField("Bölüm adı", text: $draftTitle)
+                Button("Oluştur") { createEpisode() }
+                Button("Vazgeç", role: .cancel) {}
+            } message: {
+                Text("Bu ad kütüphanede ve dışa aktarılan dosyada görünür.")
+            }
+            .alert("Bölümü adlandır", isPresented: $showRename) {
+                TextField("Bölüm adı", text: $draftTitle)
+                Button("Kaydet") { commitRename() }
+                Button("Vazgeç", role: .cancel) { renaming = nil }
             }
         }
     }
@@ -78,8 +94,7 @@ struct LibraryView: View {
                 }
                 Spacer()
                 Button {
-                    let episode = store.createEpisode()
-                    path.append(episode.id)
+                    beginCreate()
                 } label: {
                     Label("Yeni bölüm", systemImage: "plus")
                 }
@@ -116,9 +131,11 @@ struct LibraryView: View {
             ScrollView {
                 LazyVGrid(columns: [GridItem(.flexible(), spacing: 16), GridItem(.flexible(), spacing: 16)], spacing: 16) {
                     ForEach(filtered) { episode in
-                        EpisodeCard(episode: episode) {
-                            path.append(episode.id)
-                        }
+                        EpisodeCard(
+                            episode: episode,
+                            onOpen: { path.append(episode.id) },
+                            onRename: { beginRename(episode) }
+                        )
                     }
                     newCard
                 }
@@ -130,8 +147,7 @@ struct LibraryView: View {
 
     private var newCard: some View {
         Button {
-            let episode = store.createEpisode()
-            path.append(episode.id)
+            beginCreate()
         } label: {
             VStack(spacing: 12) {
                 Image(systemName: "plus")
@@ -157,11 +173,34 @@ struct LibraryView: View {
         }
         .buttonStyle(.plain)
     }
+
+    private func beginCreate() {
+        draftTitle = store.suggestedTitle()
+        showCreate = true
+    }
+
+    private func createEpisode() {
+        let episode = store.createEpisode(title: draftTitle)
+        path.append(episode.id)
+    }
+
+    private func beginRename(_ episode: Episode) {
+        renaming = episode
+        draftTitle = episode.title
+        showRename = true
+    }
+
+    private func commitRename() {
+        guard let renaming else { return }
+        store.rename(renaming, to: draftTitle)
+        self.renaming = nil
+    }
 }
 
 struct EpisodeCard: View {
     let episode: Episode
     var onOpen: () -> Void
+    var onRename: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -189,10 +228,22 @@ struct EpisodeCard: View {
                     .foregroundStyle(BoothTheme.secondary)
             }
 
-            Text(episode.title)
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(BoothTheme.text)
-                .lineLimit(2)
+            HStack(alignment: .top, spacing: 8) {
+                Text(episode.title)
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(BoothTheme.text)
+                    .lineLimit(2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Button(action: onRename) {
+                    Image(systemName: "pencil")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(BoothTheme.secondary)
+                        .frame(width: 32, height: 32)
+                        .background(BoothTheme.elevated, in: Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Bölümü adlandır")
+            }
 
             HStack {
                 Text(TimeCode.short(episode.contentDuration))
@@ -209,6 +260,10 @@ struct EpisodeCard: View {
             RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .strokeBorder(BoothTheme.hairline, lineWidth: 1)
         )
+        .contextMenu {
+            Button("Aç", action: onOpen)
+            Button("Yeniden adlandır", action: onRename)
+        }
     }
 
     private var statusPill: some View {

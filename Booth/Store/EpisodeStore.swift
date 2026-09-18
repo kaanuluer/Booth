@@ -117,11 +117,21 @@ final class EpisodeStore: ObservableObject {
         }
     }
 
-    func createEpisode() -> Episode {
-        let number = episodes.count + 1
-        let episode = Episode(title: String(format: "S01E%02d — Yeni bölüm", number))
-        save(episode)
+    func suggestedTitle() -> String {
+        String(format: "S01E%02d", episodes.count + 1)
+    }
+
+    func createEpisode(title: String? = nil) -> Episode {
+        let name = Episode.normalizedTitle(title ?? suggestedTitle())
+        let episode = Episode(title: name)
+        save(episode, persistImmediately: true)
         return episode
+    }
+
+    func rename(_ episode: Episode, to title: String) {
+        var updated = episode
+        updated.rename(to: title)
+        save(updated, persistImmediately: true)
     }
 
     func delete(_ episode: Episode) {

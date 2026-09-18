@@ -7,6 +7,7 @@ struct RecordView: View {
     @StateObject private var recorder = RecorderEngine()
     @State private var errorMessage: String?
     @State private var lastURL: URL?
+    @FocusState private var titleFocused: Bool
 
     var body: some View {
         ZStack {
@@ -43,9 +44,17 @@ struct RecordView: View {
                     .background(BoothTheme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
             VStack(alignment: .leading, spacing: 4) {
-                Text(episode.title)
+                TextField("Bölüm adı", text: $episode.title)
                     .font(.system(size: 20, weight: .semibold))
                     .foregroundStyle(BoothTheme.text)
+                    .textFieldStyle(.plain)
+                    .textInputAutocapitalization(.sentences)
+                    .submitLabel(.done)
+                    .focused($titleFocused)
+                    .onSubmit { episode.rename(to: episode.title) }
+                    .onChange(of: titleFocused) { _, focused in
+                        if !focused { episode.rename(to: episode.title) }
+                    }
                 Text("Kayıt katmana eklenecek: Konuşma")
                     .font(.system(size: 13))
                     .foregroundStyle(BoothTheme.secondary)

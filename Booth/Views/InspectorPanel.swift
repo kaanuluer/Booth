@@ -45,6 +45,19 @@ struct InspectorPanel: View {
                         }
                         .foregroundStyle(BoothTheme.text)
 
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Katman")
+                                .font(.system(size: 12))
+                                .foregroundStyle(BoothTheme.secondary)
+                            Picker("Katman", selection: trackMoveBinding(clip)) {
+                                ForEach(episode.tracks) { track in
+                                    Text(track.name).tag(track.id)
+                                }
+                            }
+                            .pickerStyle(.menu)
+                            .tint(BoothTheme.text)
+                        }
+
                         HStack {
                             Button("Böl") { episode.splitClip(clip.id, at: playhead) }
                                 .buttonStyle(BoothButtonStyle(fill: BoothTheme.elevated, foreground: BoothTheme.text))
@@ -166,6 +179,13 @@ struct InspectorPanel: View {
                     }
                 }
             }
+        )
+    }
+
+    private func trackMoveBinding(_ clip: Clip) -> Binding<UUID> {
+        Binding(
+            get: { episode.track(containing: clip.id)?.id ?? episode.tracks.first?.id ?? clip.id },
+            set: { episode.moveClip(clip.id, to: $0) }
         )
     }
 
