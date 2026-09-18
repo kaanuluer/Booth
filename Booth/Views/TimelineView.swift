@@ -358,6 +358,7 @@ struct TimelineView: View {
             .frame(width: 2, height: height)
             .offset(x: CGFloat(playhead) * pixelsPerSecond)
             .allowsHitTesting(false)
+            .transaction { $0.animation = nil }
     }
 
     private func markersOverlay(width: CGFloat, height: CGFloat) -> some View {

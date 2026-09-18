@@ -176,6 +176,7 @@ struct TransportBar: View {
                     .font(.system(size: 14, weight: .medium, design: .monospaced))
                     .foregroundStyle(BoothTheme.text)
                     .monospacedDigit()
+                    .transaction { $0.animation = nil }
 
                 BoothIconButton(systemName: "arrow.uturn.backward", action: {
                     if let restored = store.undo(for: episode.id) { episode = restored }

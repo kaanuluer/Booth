@@ -1,6 +1,7 @@
 import AVFoundation
 import Combine
 import Foundation
+import QuartzCore
 
 @MainActor
 final class MixerEngine: ObservableObject {
@@ -10,7 +11,8 @@ final class MixerEngine: ObservableObject {
     private let engine = AVAudioEngine()
     private var players: [AVAudioPlayerNode] = []
     private var effectNodes: [AVAudioNode] = []
-    private var displayTimer: Timer?
+    private var displayLink: CADisplayLink?
+    private let clock = PlayheadClock()
     private var playStartedAt: TimeInterval = 0
     private var playheadAtStart: TimeInterval = 0
     private var episodeDuration: TimeInterval = 0
@@ -32,8 +34,9 @@ final class MixerEngine: ObservableObject {
         }
 
         episodeDuration = max(episode.contentDuration, playhead + 0.1)
+        playheadAtStart = playhead
         let anySolo = episode.tracks.contains(where: \.solo)
-        let now = engine.outputNode.presentationLatency
+        var jobs: [ScheduledClip] = []
 
         for track in episode.tracks {
             if track.muted { continue }
@@ -43,7 +46,9 @@ final class MixerEngine: ObservableObject {
                 guard let url = mediaRoot.boothFile(clip.playbackFilename),
                       FileManager.default.fileExists(atPath: url.path),
                       let file = try? AVAudioFile(forReading: url) else { continue }
-                attach(clip: clip, track: track, episode: episode, file: file, delayCompensation: now)
+                if let job = attach(clip: clip, track: track, episode: episode, file: file) {
+                    jobs.append(job)
+                }
             }
         }
 
@@ -61,6 +66,7 @@ final class MixerEngine: ObservableObject {
         engine.connect(limiter, to: engine.outputNode, format: nil)
         effectNodes.append(limiter)
 
+        engine.prepare()
         do {
             try engine.start()
         } catch {
@@ -68,22 +74,27 @@ final class MixerEngine: ObservableObject {
             return
         }
 
-        let hostStart = engine.outputNode.lastRenderTime ?? AVAudioTime(hostTime: mach_absolute_time())
-        for player in players {
-            player.play()
+        let leadIn: TimeInterval = 0.05
+        let startHost = mach_absolute_time() + AVAudioTime.hostTime(forSeconds: leadIn)
+        for job in jobs {
+            let when = AVAudioTime(hostTime: startHost + AVAudioTime.hostTime(forSeconds: job.delay))
+            job.player.scheduleSegment(
+                job.file,
+                startingFrame: job.startingFrame,
+                frameCount: job.frameCount,
+                at: when
+            )
+            job.player.play(at: AVAudioTime(hostTime: startHost))
         }
 
         isPlaying = true
-        playStartedAt = hostStart.seconds
-        playheadAtStart = playhead
-        startTimer()
-        _ = hostStart
+        playStartedAt = CACurrentMediaTime() + leadIn
+        startClock()
     }
 
     func stop() {
-        displayTimer?.invalidate()
-        displayTimer = nil
         isPlaying = false
+        stopClock()
         stopGraph()
     }
 
@@ -100,37 +111,68 @@ final class MixerEngine: ObservableObject {
         seek(min(max(0, playhead + delta), max(episode.contentDuration, playhead + delta)), episode: episode, mediaRoot: mediaRoot)
     }
 
-    private func startTimer() {
-        displayTimer?.invalidate()
-        let origin = CACurrentMediaTime()
-        let start = playhead
-        displayTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 12.0, repeats: true) { [weak self] _ in
+    private func startClock() {
+        stopClock()
+        clock.onTick = { [weak self] in
             Task { @MainActor in
-                guard let self, self.isPlaying else { return }
-                let next = start + (CACurrentMediaTime() - origin)
-                if abs(next - self.playhead) < 0.04 { return }
-                self.playhead = next
-                if self.playhead >= self.episodeDuration {
-                    self.playhead = self.episodeDuration
-                    self.stop()
-                }
+                self?.tickPlayhead()
             }
         }
+        let link = CADisplayLink(target: clock, selector: #selector(PlayheadClock.fire))
+        link.preferredFrameRateRange = CAFrameRateRange(minimum: 24, maximum: 60, preferred: 30)
+        link.add(to: .main, forMode: .common)
+        displayLink = link
+    }
+
+    private func stopClock() {
+        displayLink?.invalidate()
+        displayLink = nil
+        clock.onTick = nil
+    }
+
+    private func tickPlayhead() {
+        guard isPlaying else { return }
+        let elapsed = audioElapsed() ?? max(0, CACurrentMediaTime() - playStartedAt)
+        let next = min(playheadAtStart + elapsed, episodeDuration)
+        playhead = next
+        if next >= episodeDuration {
+            playhead = episodeDuration
+            stop()
+        }
+    }
+
+    private func audioElapsed() -> TimeInterval? {
+        for player in players where player.isPlaying {
+            guard let nodeTime = player.lastRenderTime, nodeTime.isSampleTimeValid,
+                  let playerTime = player.playerTime(forNodeTime: nodeTime),
+                  playerTime.isSampleTimeValid else { continue }
+            let elapsed = Double(playerTime.sampleTime) / playerTime.sampleRate
+            if elapsed >= 0 { return elapsed }
+        }
+        return nil
     }
 
     private func stopGraph() {
         players.forEach { $0.stop() }
         if engine.isRunning {
+            engine.pause()
             engine.stop()
         }
         players.forEach { engine.detach($0) }
         effectNodes.forEach { engine.detach($0) }
         players.removeAll()
         effectNodes.removeAll()
-        engine.reset()
     }
 
-    private func attach(clip: Clip, track: Track, episode: Episode, file: AVAudioFile, delayCompensation: TimeInterval) {
+    private func attach(clip: Clip, track: Track, episode: Episode, file: AVAudioFile) -> ScheduledClip? {
+        let sampleRate = file.processingFormat.sampleRate
+        let localOffset = max(0, playhead - clip.startOnTimeline)
+        let sourceStart = min(file.length, AVAudioFramePosition((clip.sourceOffset + localOffset) * sampleRate))
+        let remaining = clip.duration - localOffset
+        guard remaining > 0.01 else { return nil }
+        let frames = min(AVAudioFrameCount(remaining * sampleRate), AVAudioFrameCount(max(0, file.length - sourceStart)))
+        guard frames > 0 else { return nil }
+
         let player = AVAudioPlayerNode()
         let isolatorEQ = AVAudioUnitEQ(numberOfBands: 6)
         configureIsolator(isolatorEQ, clip: clip, mix: episode.mix)
@@ -156,20 +198,6 @@ final class MixerEngine: ObservableObject {
         engine.connect(eq, to: dynamics, format: format)
         engine.connect(dynamics, to: engine.mainMixerNode, format: format)
 
-        let sampleRate = format.sampleRate
-        let localOffset = max(0, playhead - clip.startOnTimeline)
-        let sourceStart = min(file.length, AVAudioFramePosition((clip.sourceOffset + localOffset) * sampleRate))
-        let remaining = clip.duration - localOffset
-        guard remaining > 0.01 else { return }
-        let frames = min(AVAudioFrameCount(remaining * sampleRate), AVAudioFrameCount(max(0, file.length - sourceStart)))
-        guard frames > 0 else { return }
-
-        let delay = max(0, clip.startOnTimeline - playhead)
-        let when: AVAudioTime? = delay > 0.001
-            ? AVAudioTime(hostTime: mach_absolute_time() + AVAudioTime.hostTime(forSeconds: delay))
-            : nil
-
-        player.scheduleSegment(file, startingFrame: sourceStart, frameCount: frames, at: when)
         var volume = clip.linearGain * Float(track.volume)
         if episode.mix.duckingEnabled, track.kind != .voice {
             let overlapsVoice = episode.tracks.contains { track in
@@ -185,7 +213,13 @@ final class MixerEngine: ObservableObject {
         effectNodes.append(isolatorEQ)
         effectNodes.append(eq)
         effectNodes.append(dynamics)
-        _ = delayCompensation
+        return ScheduledClip(
+            player: player,
+            file: file,
+            startingFrame: sourceStart,
+            frameCount: frames,
+            delay: max(0, clip.startOnTimeline - playhead)
+        )
     }
 
     private func configureEQ(_ eq: AVAudioUnitEQ, clip: Clip, mix: MixSettings) {
@@ -291,8 +325,18 @@ final class MixerEngine: ObservableObject {
     }
 }
 
-private extension AVAudioTime {
-    var seconds: TimeInterval {
-        AVAudioTime.seconds(forHostTime: hostTime)
+private struct ScheduledClip {
+    let player: AVAudioPlayerNode
+    let file: AVAudioFile
+    let startingFrame: AVAudioFramePosition
+    let frameCount: AVAudioFrameCount
+    let delay: TimeInterval
+}
+
+private final class PlayheadClock: NSObject {
+    var onTick: (() -> Void)?
+
+    @objc func fire() {
+        onTick?()
     }
 }
