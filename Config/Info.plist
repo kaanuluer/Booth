@@ -8,6 +8,12 @@
 	</array>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Booth, konuşmayı transkripte çevirmek ve filler kesmek için konuşma tanımayı kullanır.</string>
+	<key>UIFileSharingEnabled</key>
+	<true/>
+	<key>LSSupportsOpeningDocumentsInPlace</key>
+	<true/>
 	<key>UILaunchScreen</key>
 	<dict/>
 </dict>

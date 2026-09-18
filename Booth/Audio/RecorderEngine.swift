@@ -23,6 +23,8 @@ final class RecorderEngine: ObservableObject {
     @Published var level: Float = 0
     @Published var livePeaks: [Float] = []
     @Published var voiceIsolation = true
+    @Published var availableInputs: [AVAudioSessionPortDescription] = []
+    @Published var selectedInputUID: String?
 
     private var engine: AVAudioEngine?
     private var file: AVAudioFile?
@@ -35,6 +37,8 @@ final class RecorderEngine: ObservableObject {
         stopGraph()
         self.voiceIsolation = voiceIsolation
         try AudioSession.configure(record: true, voiceIsolation: voiceIsolation)
+        refreshInputs()
+        applyPreferredInput()
 
         let engine = AVAudioEngine()
         let input = engine.inputNode
@@ -74,6 +78,25 @@ final class RecorderEngine: ObservableObject {
         writtenFrames = 0
         pausedDuration = 0
         startedAt = Date()
+    }
+
+    func refreshInputs() {
+        availableInputs = AVAudioSession.sharedInstance().availableInputs ?? []
+        if selectedInputUID == nil {
+            selectedInputUID = AVAudioSession.sharedInstance().preferredInput?.uid ?? availableInputs.first?.uid
+        }
+    }
+
+    func selectInput(_ uid: String?) {
+        selectedInputUID = uid
+        applyPreferredInput()
+    }
+
+    private func applyPreferredInput() {
+        let session = AVAudioSession.sharedInstance()
+        guard let uid = selectedInputUID,
+              let port = (session.availableInputs ?? []).first(where: { $0.uid == uid }) else { return }
+        try? session.setPreferredInput(port)
     }
 
     func pause() {

@@ -185,7 +185,14 @@ struct ExportSheet: View {
                 )
             }
             episode.status = .ready
+            if !snapshot.showNotes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                let notesURL = dest.deletingPathExtension().appendingPathExtension("txt")
+                try? snapshot.showNotes.data(using: .utf8)?.write(to: notesURL)
+            }
             store.save(episode)
+            if store.usingCloudFolder {
+                store.publishToSyncFolder(episode)
+            }
             isExporting = false
             progress = 1
             showShare = true

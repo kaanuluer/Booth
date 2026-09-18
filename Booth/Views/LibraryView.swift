@@ -11,11 +11,13 @@ struct LibraryView: View {
     @State private var renaming: Episode?
     @State private var deleting: Episode?
     @State private var showDelete = false
+    @State private var pickingSyncFolder = false
 
     enum Filter: String, CaseIterable, Identifiable {
         case all = "Tümü"
         case draft = "Taslak"
         case ready = "Hazır"
+        case archived = "Arşiv"
         var id: String { rawValue }
     }
 
@@ -24,9 +26,10 @@ struct LibraryView: View {
             let matchesQuery = query.isEmpty || episode.title.localizedCaseInsensitiveContains(query)
             let matchesFilter: Bool
             switch filter {
-            case .all: matchesFilter = true
+            case .all: matchesFilter = episode.status != .archived
             case .draft: matchesFilter = episode.status == .draft || episode.status == .editing || episode.status == .recording
             case .ready: matchesFilter = episode.status == .ready
+            case .archived: matchesFilter = episode.status == .archived
             }
             return matchesQuery && matchesFilter
         }
@@ -55,6 +58,11 @@ struct LibraryView: View {
                 TextField("Bölüm adı", text: $draftTitle)
                 Button("Kaydet") { commitRename() }
                 Button("Vazgeç", role: .cancel) { renaming = nil }
+            }
+            .fileImporter(isPresented: $pickingSyncFolder, allowedContentTypes: [.folder], allowsMultipleSelection: false) { result in
+                if case .success(let urls) = result, let url = urls.first {
+                    try? store.setSyncFolder(url)
+                }
             }
             .alert("Bölümü sil", isPresented: $showDelete) {
                 Button("Sil", role: .destructive) {
@@ -110,6 +118,13 @@ struct LibraryView: View {
                     Label("Yeni bölüm", systemImage: "plus")
                 }
                 .buttonStyle(BoothButtonStyle())
+                Button {
+                    pickingSyncFolder = true
+                } label: {
+                    Image(systemName: store.usingCloudFolder ? "icloud.fill" : "icloud")
+                }
+                .buttonStyle(BoothButtonStyle(fill: BoothTheme.elevated, foreground: BoothTheme.text))
+                .accessibilityLabel("iCloud klasörü")
             }
 
             HStack {
@@ -149,6 +164,14 @@ struct LibraryView: View {
                             onDelete: {
                                 deleting = episode
                                 showDelete = true
+                            },
+                            onArchive: {
+                                var next = episode
+                                next.archive(episode.status != .archived)
+                                store.save(next, persistImmediately: true)
+                                if store.usingCloudFolder {
+                                    store.publishToSyncFolder(next)
+                                }
                             }
                         )
                     }
@@ -217,6 +240,7 @@ struct EpisodeCard: View {
     var onOpen: () -> Void
     var onRename: () -> Void
     var onDelete: () -> Void
+    var onArchive: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -279,6 +303,7 @@ struct EpisodeCard: View {
         .contextMenu {
             Button("Aç", action: onOpen)
             Button("Yeniden adlandır", action: onRename)
+            Button(episode.status == .archived ? "Arşivden çıkar" : "Arşivle", action: onArchive)
             Button("Sil", role: .destructive, action: onDelete)
         }
     }
@@ -297,6 +322,7 @@ struct EpisodeCard: View {
         case .ready: return BoothTheme.success
         case .editing, .recording: return BoothTheme.voice
         case .draft: return BoothTheme.music
+        case .archived: return BoothTheme.secondary
         }
     }
 }

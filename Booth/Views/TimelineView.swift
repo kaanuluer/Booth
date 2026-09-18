@@ -19,7 +19,8 @@ struct TimelineView: View {
     private let trackHeight: CGFloat = 88
     private let headerWidth: CGFloat = 92
     private let rulerHeight: CGFloat = 36
-    private let addLaneHeight: CGFloat = 68
+    private let addLaneHeight: CGFloat = 52
+    private let clipInset: CGFloat = 8
 
     var body: some View {
         GeometryReader { geo in
@@ -27,29 +28,35 @@ struct TimelineView: View {
                 geo.size.width - headerWidth,
                 CGFloat(episode.timelineDuration) * pixelsPerSecond
             )
-            let contentHeight = rulerHeight + CGFloat(episode.tracks.count) * trackHeight + addLaneHeight
-            ScrollView([.vertical], showsIndicators: true) {
+            let rowsHeight = rulerHeight + CGFloat(episode.tracks.count) * trackHeight + addLaneHeight
+            ScrollView(.vertical, showsIndicators: true) {
                 HStack(alignment: .top, spacing: 0) {
                     headerColumn
                     ScrollView(.horizontal, showsIndicators: true) {
-                        ZStack(alignment: .topLeading) {
-                            VStack(alignment: .leading, spacing: 0) {
-                                ruler(width: contentWidth)
-                                ForEach($episode.tracks) { $track in
-                                    clipLane(track: $track, width: contentWidth)
-                                        .zIndex(isDragging(from: track) ? 20 : 0)
-                                }
-                                addLane(width: contentWidth)
+                        VStack(alignment: .leading, spacing: 0) {
+                            ruler(width: contentWidth)
+                            ForEach($episode.tracks) { $track in
+                                clipLane(track: $track, width: contentWidth)
+                                    .zIndex(isDragging(from: track) ? 20 : 0)
                             }
-                            playheadLine(height: contentHeight)
-                            markersOverlay(width: contentWidth, height: contentHeight)
+                            addLane(width: contentWidth)
                         }
-                        .frame(width: contentWidth, height: contentHeight, alignment: .topLeading)
+                        .frame(width: contentWidth, height: rowsHeight, alignment: .topLeading)
+                        .overlay(alignment: .topLeading) {
+                            playheadLine(height: rowsHeight)
+                        }
+                        .overlay(alignment: .topLeading) {
+                            markersOverlay(width: contentWidth, height: rowsHeight)
+                        }
                     }
-                    .frame(minHeight: max(geo.size.height, contentHeight))
+                    .frame(width: max(0, geo.size.width - headerWidth), height: rowsHeight, alignment: .top)
+                    .contentMargins(.all, 0, for: .scrollContent)
+                    .contentMargins(.all, 0, for: .scrollIndicators)
                 }
-                .frame(minHeight: max(geo.size.height, contentHeight), alignment: .top)
+                .frame(width: geo.size.width, height: rowsHeight, alignment: .topLeading)
             }
+            .frame(width: geo.size.width, height: geo.size.height)
+            .contentMargins(.all, 0, for: .scrollContent)
         }
         .background(BoothTheme.canvas)
     }
@@ -73,11 +80,12 @@ struct TimelineView: View {
             .disabled(episode.tracks.count >= Episode.maxTracks)
         }
         .frame(width: headerWidth, alignment: .top)
+        .clipped()
         .background(BoothTheme.surface)
     }
 
     private func trackHeader(_ track: Binding<Track>) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 6) {
                 Circle().fill(BoothTheme.trackColor(track.wrappedValue.kind)).frame(width: 8, height: 8)
                 Text(track.wrappedValue.name)
@@ -99,26 +107,67 @@ struct TimelineView: View {
                 .font(.system(size: 11, weight: .bold))
                 .foregroundStyle(track.wrappedValue.solo ? BoothTheme.music : BoothTheme.secondary)
             }
-            Slider(value: Binding(
-                get: { track.wrappedValue.volume },
-                set: { track.wrappedValue.volume = $0 }
-            ), in: 0...1.5)
-            .tint(BoothTheme.trackColor(track.wrappedValue.kind))
+            volumeBar(track)
+            panBar(track)
         }
         .padding(8)
         .frame(width: headerWidth, height: trackHeight, alignment: .topLeading)
+        .clipped()
         .overlay(alignment: .bottom) { Divider().background(BoothTheme.hairline) }
     }
 
+    private func volumeBar(_ track: Binding<Track>) -> some View {
+        GeometryReader { geo in
+            let ratio = max(0, min(1, track.wrappedValue.volume / 1.5))
+            ZStack(alignment: .leading) {
+                Capsule().fill(BoothTheme.elevated)
+                Capsule()
+                    .fill(BoothTheme.trackColor(track.wrappedValue.kind))
+                    .frame(width: max(6, geo.size.width * ratio))
+            }
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 1)
+                    .onChanged { value in
+                        let next = Double(value.location.x / max(geo.size.width, 1)) * 1.5
+                        track.wrappedValue.volume = max(0, min(1.5, next))
+                    }
+            )
+        }
+        .frame(height: 10)
+    }
+
+    private func panBar(_ track: Binding<Track>) -> some View {
+        GeometryReader { geo in
+            let ratio = (track.wrappedValue.pan + 1) / 2
+            ZStack(alignment: .leading) {
+                Capsule().fill(BoothTheme.elevated)
+                Capsule()
+                    .fill(BoothTheme.secondary)
+                    .frame(width: 10)
+                    .offset(x: max(0, min(geo.size.width - 10, geo.size.width * ratio - 5)))
+            }
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 1)
+                    .onChanged { value in
+                        let next = Double(value.location.x / max(geo.size.width, 1)) * 2 - 1
+                        track.wrappedValue.pan = max(-1, min(1, next))
+                    }
+            )
+        }
+        .frame(height: 8)
+    }
+
     private func ruler(width: CGFloat) -> some View {
-        ZStack(alignment: .leading) {
+        ZStack(alignment: .topLeading) {
             BoothTheme.surface
             Path { path in
                 let seconds = Int(episode.timelineDuration)
                 for s in stride(from: 0, through: seconds, by: 5) {
                     let x = CGFloat(s) * pixelsPerSecond
                     path.move(to: CGPoint(x: x, y: 22))
-                    path.addLine(to: CGPoint(x: x, y: 36))
+                    path.addLine(to: CGPoint(x: x, y: rulerHeight))
                 }
             }
             .stroke(BoothTheme.hairline, lineWidth: 1)
@@ -127,10 +176,11 @@ struct TimelineView: View {
                 Text(TimeCode.format(TimeInterval(s)))
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundStyle(BoothTheme.secondary)
-                    .offset(x: CGFloat(s) * pixelsPerSecond + 4, y: 4)
+                    .position(x: CGFloat(s) * pixelsPerSecond + 28, y: 12)
             }
         }
         .frame(width: width, height: rulerHeight)
+        .clipped()
         .contentShape(Rectangle())
         .onTapGesture { location in
             let t = TimeInterval(location.x / pixelsPerSecond)
@@ -141,19 +191,23 @@ struct TimelineView: View {
     }
 
     private func clipLane(track: Binding<Track>, width: CGFloat) -> some View {
-        ZStack(alignment: .leading) {
-            RoundedRectangle(cornerRadius: 0)
-                .fill(hoverTrackID == track.wrappedValue.id ? BoothTheme.trackColor(track.wrappedValue.kind).opacity(0.14) : BoothTheme.canvas)
+        ZStack(alignment: .topLeading) {
+            BoothTheme.canvas
             if hoverTrackID == track.wrappedValue.id {
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .strokeBorder(BoothTheme.trackColor(track.wrappedValue.kind).opacity(0.85), style: StrokeStyle(lineWidth: 1.5, dash: [7, 5]))
+                    .fill(BoothTheme.trackColor(track.wrappedValue.kind).opacity(0.14))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .strokeBorder(BoothTheme.trackColor(track.wrappedValue.kind).opacity(0.85), style: StrokeStyle(lineWidth: 1.5, dash: [7, 5]))
+                    )
                     .padding(4)
             }
             ForEach(track.wrappedValue.clips) { clip in
                 clipBlock(clip, track: track.wrappedValue)
             }
         }
-        .frame(width: width, height: trackHeight)
+        .frame(width: width, height: trackHeight, alignment: .topLeading)
+        .clipped()
         .contentShape(Rectangle())
         .overlay(alignment: .bottom) { Divider().background(BoothTheme.hairline) }
     }
@@ -166,15 +220,15 @@ struct TimelineView: View {
         let previewKind = dragging ? (episode.tracks.first(where: { $0.id == hoverTrackID })?.kind ?? track.kind) : track.kind
         let trackColor = BoothTheme.trackColor(previewKind)
         return FileWaveform(url: mediaRoot.appendingPathComponent(clip.playbackFilename), color: trackColor)
-            .frame(width: w, height: trackHeight - 16)
+            .frame(width: w, height: trackHeight - clipInset * 2)
             .background(trackColor.opacity(dragging ? 0.42 : 0.28), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-            .overlay(alignment: .topLeading) {
+            .overlay(alignment: .top) {
                 Text(clip.name)
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(BoothTheme.text)
                     .padding(.horizontal, 6)
                     .lineLimit(1)
-                    .frame(maxWidth: .infinity, minHeight: 26, alignment: .leading)
+                    .frame(width: w, height: 26, alignment: .leading)
                     .background(Color.black.opacity(0.22))
                     .contentShape(Rectangle())
                     .gesture(
@@ -191,6 +245,7 @@ struct TimelineView: View {
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .strokeBorder(selected || dragging ? Color.white : trackColor.opacity(0.7), lineWidth: selected || dragging ? 2 : 1)
             )
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             .shadow(color: dragging ? .black.opacity(0.45) : .clear, radius: 12, y: 6)
             .overlay(alignment: .leading) {
                 trimHandle(clip: clip, edge: .start)
@@ -198,7 +253,8 @@ struct TimelineView: View {
             .overlay(alignment: .trailing) {
                 trimHandle(clip: clip, edge: .end)
             }
-            .offset(x: x, y: 8 + (dragging ? dragOffsetY : 0))
+            .frame(width: w, height: trackHeight - clipInset * 2)
+            .offset(x: x, y: clipInset + (dragging ? dragOffsetY : 0))
             .zIndex(dragging ? 50 : 0)
             .onTapGesture { selectedClipID = clip.id }
             .contextMenu {
@@ -273,13 +329,16 @@ struct TimelineView: View {
     }
 
     private func addLane(width: CGFloat) -> some View {
-        RoundedRectangle(cornerRadius: 8, style: .continuous)
-            .strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [6, 5]))
-            .foregroundStyle(BoothTheme.hairline)
-            .frame(width: max(0, width - 16), height: 52)
-            .padding(.vertical, 8)
-            .padding(.horizontal, 8)
-            .frame(width: width, height: addLaneHeight, alignment: .leading)
+        Rectangle()
+            .fill(BoothTheme.canvas)
+            .frame(width: width, height: addLaneHeight)
+            .overlay {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [6, 5]))
+                    .foregroundStyle(BoothTheme.hairline)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 8)
+            }
             .allowsHitTesting(false)
     }
 

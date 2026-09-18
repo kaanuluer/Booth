@@ -178,6 +178,7 @@ final class MixerEngine: ObservableObject {
             }
         }
         player.volume = volume
+        player.pan = Float(max(-1, min(1, track.pan)))
         players.append(player)
         effectNodes.append(isolatorEQ)
         effectNodes.append(eq)

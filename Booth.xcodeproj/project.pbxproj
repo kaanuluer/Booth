@@ -6,6 +6,16 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXContainerItemProxy section */
+		A1000000000000000000002A /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A10000000000000000000006 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A10000000000000000000005;
+			remoteInfo = Booth;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
 		A10000000000000000000002 /* Booth.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Booth.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A10000000000000000000020 /* BoothTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = BoothTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -144,24 +154,6 @@
 		};
 /* End PBXProject section */
 
-/* Begin PBXContainerItemProxy section */
-		A1000000000000000000002A /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = A10000000000000000000006 /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = A10000000000000000000005;
-			remoteInfo = Booth;
-		};
-/* End PBXContainerItemProxy section */
-
-/* Begin PBXTargetDependency section */
-		A1000000000000000000002B /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = A10000000000000000000005 /* Booth */;
-			targetProxy = A1000000000000000000002A /* PBXContainerItemProxy */;
-		};
-/* End PBXTargetDependency section */
-
 /* Begin PBXResourcesBuildPhase section */
 		A10000000000000000000009 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
@@ -195,6 +187,14 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		A1000000000000000000002B /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = A10000000000000000000005 /* Booth */;
+			targetProxy = A1000000000000000000002A /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		A1000000000000000000000A /* Debug */ = {
@@ -330,6 +330,9 @@
 				INFOPLIST_KEY_CFBundleDisplayName = Booth;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.music";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Booth, konuşma kaydı için mikrofona ihtiyaç duyar.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Booth, konuşmayı transkripte çevirmek ve filler kesmek için konuşma tanımayı kullanır.";
+				INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES;
+				INFOPLIST_KEY_UIFileSharingEnabled = YES;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
@@ -337,7 +340,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 2.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.uluersolutions.booth;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
@@ -364,6 +367,9 @@
 				INFOPLIST_KEY_CFBundleDisplayName = Booth;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.music";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Booth, konuşma kaydı için mikrofona ihtiyaç duyar.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Booth, konuşmayı transkripte çevirmek ve filler kesmek için konuşma tanımayı kullanır.";
+				INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES;
+				INFOPLIST_KEY_UIFileSharingEnabled = YES;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
@@ -371,7 +377,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 2.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.uluersolutions.booth;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
@@ -393,7 +399,7 @@
 				DEVELOPMENT_TEAM = 2GCV66YKTM;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 2.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.uluersolutions.booth.tests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
@@ -414,7 +420,7 @@
 				DEVELOPMENT_TEAM = 2GCV66YKTM;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 2.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.uluersolutions.booth.tests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";

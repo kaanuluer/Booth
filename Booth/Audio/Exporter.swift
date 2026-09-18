@@ -336,8 +336,9 @@ enum OfflineExporter {
                 ducked = MixMath.duckGain(voiceAmplitude: destIndex < voice.count ? abs(voice[destIndex]) : 0, amount: episode.mix.duckingAmount)
             }
             sample *= clipGain * env * ducked
-            mixLeft[destIndex] += sample
-            mixRight[destIndex] += sample
+            let pan = MixMath.panGains(track.pan)
+            mixLeft[destIndex] += sample * pan.left
+            mixRight[destIndex] += sample * pan.right
             if track.kind == .voice, destIndex < voice.count {
                 voice[destIndex] += sample
             }

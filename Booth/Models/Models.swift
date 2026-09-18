@@ -6,6 +6,7 @@ enum EpisodeStatus: String, Codable, CaseIterable, Identifiable {
     case recording = "Kayıt"
     case editing = "Düzenleme"
     case ready = "Hazır"
+    case archived = "Arşiv"
 
     var id: String { rawValue }
 }
@@ -249,6 +250,7 @@ struct Clip: Identifiable, Codable, Hashable {
     var fadeOut: TimeInterval
     var effects: ClipEffects
     var enhancedFilename: String?
+    var transcriptSegments: [TranscriptSegment]
 
     init(
         id: UUID = UUID(),
@@ -262,7 +264,8 @@ struct Clip: Identifiable, Codable, Hashable {
         fadeIn: TimeInterval = 0,
         fadeOut: TimeInterval = 0,
         effects: ClipEffects = ClipEffects(),
-        enhancedFilename: String? = nil
+        enhancedFilename: String? = nil,
+        transcriptSegments: [TranscriptSegment] = []
     ) {
         self.id = id
         self.name = name
@@ -276,6 +279,7 @@ struct Clip: Identifiable, Codable, Hashable {
         self.fadeOut = fadeOut
         self.effects = effects
         self.enhancedFilename = enhancedFilename
+        self.transcriptSegments = transcriptSegments
     }
 
     init(from decoder: Decoder) throws {
@@ -292,6 +296,7 @@ struct Clip: Identifiable, Codable, Hashable {
         fadeOut = try container.decodeIfPresent(TimeInterval.self, forKey: .fadeOut) ?? 0
         effects = try container.decodeIfPresent(ClipEffects.self, forKey: .effects) ?? ClipEffects()
         enhancedFilename = try container.decodeIfPresent(String.self, forKey: .enhancedFilename)
+        transcriptSegments = try container.decodeIfPresent([TranscriptSegment].self, forKey: .transcriptSegments) ?? []
     }
 
     var endTime: TimeInterval { startOnTimeline + duration }
@@ -310,6 +315,7 @@ struct Track: Identifiable, Codable, Hashable {
     var muted: Bool
     var solo: Bool
     var volume: Double
+    var pan: Double
     var clips: [Clip]
 
     init(
@@ -319,6 +325,7 @@ struct Track: Identifiable, Codable, Hashable {
         muted: Bool = false,
         solo: Bool = false,
         volume: Double = 1.0,
+        pan: Double = 0,
         clips: [Clip] = []
     ) {
         self.id = id
@@ -327,7 +334,20 @@ struct Track: Identifiable, Codable, Hashable {
         self.muted = muted
         self.solo = solo
         self.volume = volume
+        self.pan = pan
         self.clips = clips
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        kind = try container.decode(TrackKind.self, forKey: .kind)
+        muted = try container.decodeIfPresent(Bool.self, forKey: .muted) ?? false
+        solo = try container.decodeIfPresent(Bool.self, forKey: .solo) ?? false
+        volume = try container.decodeIfPresent(Double.self, forKey: .volume) ?? 1
+        pan = try container.decodeIfPresent(Double.self, forKey: .pan) ?? 0
+        clips = try container.decodeIfPresent([Clip].self, forKey: .clips) ?? []
     }
 
     static func template(_ kind: TrackKind, name: String? = nil) -> Track {
@@ -350,6 +370,8 @@ struct Episode: Identifiable, Codable, Hashable {
     var artworkFilename: String?
     var introAssetID: UUID?
     var outroAssetID: UUID?
+    var transcript: String
+    var showNotes: String
 
     init(
         id: UUID = UUID(),
@@ -367,7 +389,9 @@ struct Episode: Identifiable, Codable, Hashable {
         mix: MixSettings = MixSettings(),
         artworkFilename: String? = nil,
         introAssetID: UUID? = nil,
-        outroAssetID: UUID? = nil
+        outroAssetID: UUID? = nil,
+        transcript: String = "",
+        showNotes: String = ""
     ) {
         self.id = id
         self.title = title
@@ -381,6 +405,8 @@ struct Episode: Identifiable, Codable, Hashable {
         self.artworkFilename = artworkFilename
         self.introAssetID = introAssetID
         self.outroAssetID = outroAssetID
+        self.transcript = transcript
+        self.showNotes = showNotes
     }
 
     init(from decoder: Decoder) throws {
@@ -399,6 +425,8 @@ struct Episode: Identifiable, Codable, Hashable {
         artworkFilename = try container.decodeIfPresent(String.self, forKey: .artworkFilename)
         introAssetID = try container.decodeIfPresent(UUID.self, forKey: .introAssetID)
         outroAssetID = try container.decodeIfPresent(UUID.self, forKey: .outroAssetID)
+        transcript = try container.decodeIfPresent(String.self, forKey: .transcript) ?? ""
+        showNotes = try container.decodeIfPresent(String.self, forKey: .showNotes) ?? ""
     }
 
     var contentDuration: TimeInterval {
@@ -565,19 +593,58 @@ struct Episode: Identifiable, Codable, Hashable {
         }
     }
 
-    mutating func appendRecording(_ asset: MediaAsset, duration: TimeInterval) {
+    mutating func appendRecording(_ asset: MediaAsset, duration: TimeInterval, at time: TimeInterval? = nil, punch: Bool = false) {
         library.append(asset)
         guard let voice = tracks.first(where: { $0.kind == .voice }) else { return }
-        let start = tracks.first(where: { $0.kind == .voice })?.clips.map(\.endTime).max() ?? 0
+        let start = time ?? (tracks.first(where: { $0.kind == .voice })?.clips.map(\.endTime).max() ?? 0)
         let clip = Clip(
             name: asset.displayName,
             filename: asset.filename,
-            startOnTimeline: start,
+            startOnTimeline: max(0, start),
             duration: duration,
             sourceDuration: duration
         )
+        if punch, let index = tracks.firstIndex(where: { $0.kind == .voice }) {
+            tracks[index].clips = MixMath.punchReplace(clips: tracks[index].clips, punch: clip)
+            status = .editing
+            touch()
+            return
+        }
         addClip(clip, to: voice.id)
         status = .editing
+    }
+
+    mutating func applyTranscript(clipID: UUID, text: String, segments: [TranscriptSegment]) {
+        updateClip(clipID) { $0.transcriptSegments = segments }
+        if transcript.isEmpty {
+            transcript = text
+        } else if !transcript.contains(text) {
+            transcript += "\n\n" + text
+        }
+        if showNotes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            showNotes = SpeechTranscriber.showNotes(title: title, transcript: transcript, chapters: markers)
+        }
+        touch()
+    }
+
+    mutating func stripFillers(clipID: UUID) {
+        guard let clip = clip(id: clipID) else { return }
+        let cuts = clip.transcriptSegments.filter(\.isFiller).compactMap { segment -> MixMath.Region? in
+            let start = segment.start - clip.sourceOffset
+            let end = start + segment.duration
+            let clampedStart = max(0, start)
+            let clampedEnd = min(clip.duration, end)
+            guard clampedEnd - clampedStart > 0.04 else { return nil }
+            return MixMath.Region(start: clampedStart, duration: clampedEnd - clampedStart)
+        }
+        let keep = MixMath.invertCuts(duration: clip.duration, cuts: cuts)
+        guard !keep.isEmpty, keep != [MixMath.Region(start: 0, duration: clip.duration)] else { return }
+        replaceClip(clipID, with: keep, nameSuffix: " ·")
+    }
+
+    mutating func archive(_ on: Bool) {
+        status = on ? .archived : (contentDuration > 0.2 ? .editing : .draft)
+        touch()
     }
 
     mutating func placeAsset(_ asset: MediaAsset, on kind: TrackKind, at time: TimeInterval) {

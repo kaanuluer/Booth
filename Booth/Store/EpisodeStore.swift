@@ -13,16 +13,65 @@ final class EpisodeStore: ObservableObject {
 
     private let fileManager = FileManager.default
 
+    @Published private(set) var usingCloudFolder = false
+
+    private static let syncBookmarkKey = "booth.syncFolder.bookmark"
+
     var rootURL: URL {
-        Self.rootURL
+        Self.resolvedRoot()
     }
 
     static var rootURL: URL {
-        let url = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        resolvedRoot()
+    }
+
+    private static func documentsRoot() -> URL {
+        let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Booth", isDirectory: true)
         if !FileManager.default.fileExists(atPath: url.path) {
             try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         }
+        migrateLegacyIfNeeded(to: url)
+        return url
+    }
+
+    private static func migrateLegacyIfNeeded(to destination: URL) {
+        let marker = destination.appendingPathComponent(".migrated-from-support")
+        guard !FileManager.default.fileExists(atPath: marker.path) else { return }
+        let legacy = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Booth", isDirectory: true)
+        if let items = try? FileManager.default.contentsOfDirectory(at: legacy, includingPropertiesForKeys: nil) {
+            for item in items {
+                let dest = destination.appendingPathComponent(item.lastPathComponent)
+                if !FileManager.default.fileExists(atPath: dest.path) {
+                    try? FileManager.default.copyItem(at: item, to: dest)
+                }
+            }
+        }
+        try? Data().write(to: marker)
+    }
+
+    private static func resolvedRoot() -> URL {
+        if let cloud = FileManager.default.url(forUbiquityContainerIdentifier: nil)?
+            .appendingPathComponent("Documents", isDirectory: true)
+            .appendingPathComponent("Booth", isDirectory: true) {
+            try? FileManager.default.createDirectory(at: cloud, withIntermediateDirectories: true)
+            migrateLegacyIfNeeded(to: cloud)
+            return cloud
+        }
+        if let bookmarked = bookmarkedFolder() {
+            return bookmarked
+        }
+        return documentsRoot()
+    }
+
+    private static func bookmarkedFolder() -> URL? {
+        guard let data = UserDefaults.standard.data(forKey: syncBookmarkKey) else { return nil }
+        var stale = false
+        guard let url = try? URL(resolvingBookmarkData: data, options: [], relativeTo: nil, bookmarkDataIsStale: &stale) else {
+            return nil
+        }
+        _ = url.startAccessingSecurityScopedResource()
         return url
     }
 
@@ -34,7 +83,29 @@ final class EpisodeStore: ObservableObject {
     }
 
     init() {
+        usingCloudFolder = FileManager.default.url(forUbiquityContainerIdentifier: nil) != nil
+            || UserDefaults.standard.data(forKey: Self.syncBookmarkKey) != nil
         load()
+    }
+
+    func setSyncFolder(_ url: URL) throws {
+        let accessed = url.startAccessingSecurityScopedResource()
+        defer { if accessed { url.stopAccessingSecurityScopedResource() } }
+        let data = try url.bookmarkData(options: [], includingResourceValuesForKeys: nil, relativeTo: nil)
+        UserDefaults.standard.set(data, forKey: Self.syncBookmarkKey)
+        usingCloudFolder = true
+        load()
+    }
+
+    func publishToSyncFolder(_ episode: Episode) {
+        guard let destRoot = Self.bookmarkedFolder() ?? FileManager.default.url(forUbiquityContainerIdentifier: nil)?
+            .appendingPathComponent("Documents/Booth", isDirectory: true) else { return }
+        try? fileManager.createDirectory(at: destRoot, withIntermediateDirectories: true)
+        let dest = destRoot.appendingPathComponent(episode.id.uuidString, isDirectory: true)
+        let source = episodeDirectory(episode)
+        if dest.standardizedFileURL == source.standardizedFileURL { return }
+        try? fileManager.removeItem(at: dest)
+        try? fileManager.copyItem(at: source, to: dest)
     }
 
     func episodeDirectory(_ episode: Episode) -> URL {
@@ -65,6 +136,9 @@ final class EpisodeStore: ObservableObject {
         var loaded: [Episode] = []
         for folder in ids where folder.hasDirectoryPath {
             let json = folder.appendingPathComponent("episode.json")
+            if fileManager.isUbiquitousItem(at: json) {
+                try? fileManager.startDownloadingUbiquitousItem(at: json)
+            }
             guard let data = try? Data(contentsOf: json),
                   let episode = try? JSONDecoder().decode(Episode.self, from: data) else { continue }
             loaded.append(episode)

@@ -9,7 +9,10 @@ struct EditorView: View {
     @State private var pixelsPerSecond: CGFloat = 36
     @State private var snapEnabled = true
     @State private var showRecord = false
+    @State private var punchIn = false
+    @State private var punchAt: TimeInterval = 0
     @State private var showExport = false
+    @State private var showNotes = false
     @State private var isImporting = false
     @State private var libraryCollapsed = false
     @State private var importKind: TrackKind = .music
@@ -24,7 +27,17 @@ struct EditorView: View {
                     snapEnabled: $snapEnabled,
                     pixelsPerSecond: $pixelsPerSecond,
                     mediaRoot: store.mediaDirectory(episode),
-                    onRecord: { showRecord = true },
+                    onRecord: {
+                        punchIn = false
+                        punchAt = 0
+                        showRecord = true
+                    },
+                    onPunch: {
+                        punchIn = true
+                        punchAt = mixer.playhead
+                        showRecord = true
+                    },
+                    onNotes: { showNotes = true },
                     onExport: { showExport = true }
                 )
                 Divider().background(BoothTheme.hairline)
@@ -70,7 +83,11 @@ struct EditorView: View {
         .toolbarBackground(BoothTheme.canvas, for: .navigationBar)
         .toolbarColorScheme(.dark, for: .navigationBar)
         .fullScreenCover(isPresented: $showRecord) {
-            RecordView(episode: $episode)
+            RecordView(episode: $episode, punchIn: punchIn, punchAt: punchAt)
+                .environmentObject(store)
+        }
+        .sheet(isPresented: $showNotes) {
+            TranscriptNotesView(episode: $episode, mediaRoot: store.mediaDirectory(episode))
                 .environmentObject(store)
         }
         .sheet(isPresented: $showExport) {
@@ -109,6 +126,8 @@ struct TransportBar: View {
     @Binding var pixelsPerSecond: CGFloat
     var mediaRoot: URL
     var onRecord: () -> Void
+    var onPunch: () -> Void
+    var onNotes: () -> Void
     var onExport: () -> Void
     @FocusState private var titleFocused: Bool
     @EnvironmentObject private var store: EpisodeStore
@@ -198,6 +217,16 @@ struct TransportBar: View {
                 Label("Kayıt", systemImage: "record.circle")
             }
             .buttonStyle(BoothButtonStyle())
+
+            Button(action: onPunch) {
+                Label("Punch-in", systemImage: "arrow.uturn.left")
+            }
+            .buttonStyle(BoothButtonStyle(fill: BoothTheme.elevated, foreground: BoothTheme.text))
+
+            Button(action: onNotes) {
+                Label("Notlar", systemImage: "text.alignleft")
+            }
+            .buttonStyle(BoothButtonStyle(fill: BoothTheme.elevated, foreground: BoothTheme.text))
 
             Button(action: onExport) {
                 Label("Yayına hazırla", systemImage: "square.and.arrow.up")

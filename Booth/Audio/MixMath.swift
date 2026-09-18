@@ -92,6 +92,59 @@ enum MixMath {
         return min(maxDuration, max(0.05, duration + delta))
     }
 
+    static func panGains(_ pan: Double) -> (left: Float, right: Float) {
+        let clamped = max(-1, min(1, pan))
+        let angle = (clamped + 1) * Double.pi / 4
+        return (Float(cos(angle)), Float(sin(angle)))
+    }
+
+    static func punchReplace(clips: [Clip], punch: Clip) -> [Clip] {
+        let punchStart = punch.startOnTimeline
+        let punchEnd = punch.endTime
+        var next: [Clip] = []
+        for clip in clips {
+            if clip.endTime <= punchStart + 0.01 || clip.startOnTimeline >= punchEnd - 0.01 {
+                next.append(clip)
+                continue
+            }
+            if clip.startOnTimeline < punchStart - 0.01 {
+                var left = clip
+                left.id = UUID()
+                left.duration = punchStart - clip.startOnTimeline
+                if left.duration >= 0.05 { next.append(left) }
+            }
+            if clip.endTime > punchEnd + 0.01 {
+                var right = clip
+                right.id = UUID()
+                let delta = punchEnd - clip.startOnTimeline
+                right.startOnTimeline = punchEnd
+                right.sourceOffset = clip.sourceOffset + delta
+                right.duration = clip.endTime - punchEnd
+                if right.duration >= 0.05 { next.append(right) }
+            }
+        }
+        next.append(punch)
+        return next.sorted { $0.startOnTimeline < $1.startOnTimeline }
+    }
+
+    static func invertCuts(duration: TimeInterval, cuts: [Region], pad: TimeInterval = 0.05) -> [Region] {
+        let sorted = cuts.sorted { $0.start < $1.start }
+        var keep: [Region] = []
+        var cursor: TimeInterval = 0
+        for cut in sorted {
+            let start = max(0, cut.start - pad)
+            let end = min(duration, cut.end + pad)
+            if start > cursor + 0.05 {
+                keep.append(Region(start: cursor, duration: start - cursor))
+            }
+            cursor = max(cursor, end)
+        }
+        if duration - cursor >= 0.05 {
+            keep.append(Region(start: cursor, duration: duration - cursor))
+        }
+        return keep
+    }
+
     static func rippleShift(clips: [Clip], removedStart: TimeInterval, removedDuration: TimeInterval) -> [Clip] {
         clips.map { clip in
             var next = clip

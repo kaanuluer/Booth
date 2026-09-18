@@ -118,11 +118,15 @@ final class EpisodeEditTests: XCTestCase {
         object.removeValue(forKey: "artworkFilename")
         object.removeValue(forKey: "introAssetID")
         object.removeValue(forKey: "outroAssetID")
+        object.removeValue(forKey: "transcript")
+        object.removeValue(forKey: "showNotes")
         let slim = try JSONSerialization.data(withJSONObject: object)
         let episode = try JSONDecoder().decode(Episode.self, from: slim)
         XCTAssertEqual(episode.title, "Eski")
         XCTAssertTrue(episode.mix.limiterEnabled)
         XCTAssertNil(episode.artworkFilename)
+        XCTAssertEqual(episode.transcript, "")
+        XCTAssertEqual(episode.tracks[0].pan, 0, accuracy: 0.0001)
     }
 
     func testApplyShowTemplateDoesNotDuplicate() {
@@ -153,5 +157,51 @@ final class EpisodeEditTests: XCTestCase {
         let redone = store.redo(for: episode.id)
         XCTAssertEqual(redone?.title, "İki")
         store.delete(episode)
+    }
+
+    func testPunchReplaceSplitsExistingClip() {
+        let existing = Clip(name: "A", filename: "a.m4a", startOnTimeline: 0, duration: 10, sourceDuration: 10)
+        let punch = Clip(name: "P", filename: "p.m4a", startOnTimeline: 3, duration: 2, sourceDuration: 2)
+        let next = MixMath.punchReplace(clips: [existing], punch: punch)
+        XCTAssertEqual(next.count, 3)
+        XCTAssertEqual(next[0].duration, 3, accuracy: 0.01)
+        XCTAssertEqual(next[1].filename, "p.m4a")
+        XCTAssertEqual(next[2].startOnTimeline, 5, accuracy: 0.01)
+        XCTAssertEqual(next[2].sourceOffset, 5, accuracy: 0.01)
+    }
+
+    func testFillerLexiconDetectsTurkishFillers() {
+        XCTAssertTrue(FillerLexicon.isFiller("yani"))
+        XCTAssertTrue(FillerLexicon.isFiller("Şey,"))
+        XCTAssertFalse(FillerLexicon.isFiller("merhaba"))
+    }
+
+    func testInvertCutsKeepsSpeechAroundFillers() {
+        let keep = MixMath.invertCuts(
+            duration: 4,
+            cuts: [MixMath.Region(start: 1.5, duration: 0.3)],
+            pad: 0
+        )
+        XCTAssertEqual(keep.count, 2)
+        XCTAssertEqual(keep[0].start, 0, accuracy: 0.001)
+        XCTAssertEqual(keep[0].duration, 1.5, accuracy: 0.001)
+        XCTAssertEqual(keep[1].start, 1.8, accuracy: 0.001)
+    }
+
+    func testShowNotesIncludesChapters() {
+        let notes = SpeechTranscriber.showNotes(
+            title: "S01E01",
+            transcript: "Bugün konuğumuz stüdyoda. Podcast kaydını bitiriyoruz.",
+            chapters: [Marker(time: 12, label: "Giriş", isChapter: true)]
+        )
+        XCTAssertTrue(notes.contains("S01E01"))
+        XCTAssertTrue(notes.contains("Giriş"))
+        XCTAssertTrue(notes.contains("Özet"))
+    }
+
+    func testPanCenterIsUnity() {
+        let pan = MixMath.panGains(0)
+        XCTAssertEqual(pan.left, pan.right, accuracy: 0.001)
+        XCTAssertGreaterThan(pan.left, 0.6)
     }
 }

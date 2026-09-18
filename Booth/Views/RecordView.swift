@@ -2,6 +2,8 @@ import SwiftUI
 
 struct RecordView: View {
     @Binding var episode: Episode
+    var punchIn: Bool = false
+    var punchAt: TimeInterval = 0
     @EnvironmentObject private var store: EpisodeStore
     @Environment(\.dismiss) private var dismiss
     @StateObject private var recorder = RecorderEngine()
@@ -19,6 +21,9 @@ struct RecordView: View {
                 transport
             }
             .padding(28)
+        }
+        .onAppear {
+            recorder.refreshInputs()
         }
         .alert("Kayıt", isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) {
             Button("Tamam", role: .cancel) {}
@@ -55,7 +60,7 @@ struct RecordView: View {
                     .onChange(of: titleFocused) { _, focused in
                         if !focused { episode.rename(to: episode.title) }
                     }
-                Text("Kayıt katmana eklenecek: Konuşma")
+                Text(punchIn ? "Punch-in · Konuşma katmanı üzerine yazılır" : "Kayıt katmana eklenecek: Konuşma")
                     .font(.system(size: 13))
                     .foregroundStyle(BoothTheme.secondary)
             }
@@ -64,6 +69,18 @@ struct RecordView: View {
                 .tint(BoothTheme.accent)
                 .foregroundStyle(BoothTheme.text)
                 .frame(maxWidth: 220)
+            if !recorder.availableInputs.isEmpty {
+                Picker("Giriş", selection: Binding(
+                    get: { recorder.selectedInputUID ?? recorder.availableInputs.first?.uid ?? "" },
+                    set: { recorder.selectInput($0.isEmpty ? nil : $0) }
+                )) {
+                    ForEach(recorder.availableInputs, id: \.uid) { input in
+                        Text(input.portName).tag(input.uid)
+                    }
+                }
+                .tint(BoothTheme.text)
+                .frame(maxWidth: 180)
+            }
             Label("48 kHz", systemImage: "mic.fill")
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(BoothTheme.success)
@@ -79,7 +96,7 @@ struct RecordView: View {
                 .fill(BoothTheme.surface)
             HStack(alignment: .center, spacing: 16) {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text(recorder.isRecording ? "CANLI KAYIT" : "HAZIR")
+                    Text(recorder.isRecording ? (punchIn ? "PUNCH-IN" : "CANLI KAYIT") : "HAZIR")
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(recorder.isRecording ? BoothTheme.accent : BoothTheme.secondary)
                     Text(TimeCode.format(recorder.duration))
@@ -138,7 +155,7 @@ struct RecordView: View {
     private var transport: some View {
         HStack(spacing: 16) {
             Button {
-                episode.markers.append(Marker(time: recorder.duration, label: "İşaret"))
+                episode.markers.append(Marker(time: (punchIn ? punchAt : 0) + recorder.duration, label: punchIn ? "Punch" : "İşaret"))
                 store.save(episode)
             } label: {
                 Label("Bayrak", systemImage: "flag")
@@ -211,13 +228,14 @@ struct RecordView: View {
     private func finishTake() {
         let duration = recorder.stop()
         guard duration > 0.2, let url = lastURL else { return }
+        let takeIndex = (episode.tracks.first(where: { $0.kind == .voice })?.clips.count ?? 0) + 1
         let asset = MediaAsset(
             filename: url.lastPathComponent,
-            displayName: "Take \( (episode.tracks.first(where: { $0.kind == .voice })?.clips.count ?? 0) + 1 )",
+            displayName: punchIn ? "Punch \(takeIndex)" : "Take \(takeIndex)",
             duration: duration,
             kindHint: .voice
         )
-        episode.appendRecording(asset, duration: duration)
+        episode.appendRecording(asset, duration: duration, at: punchIn ? punchAt : nil, punch: punchIn)
         store.save(episode)
         lastURL = nil
     }

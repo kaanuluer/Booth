@@ -82,6 +82,27 @@ struct InspectorPanel: View {
                             stripSilence(clip)
                         }
                         .buttonStyle(BoothButtonStyle(fill: BoothTheme.elevated, foreground: BoothTheme.text))
+                        Button("Transkript") {
+                            transcribe(clip)
+                        }
+                        .buttonStyle(BoothButtonStyle(fill: BoothTheme.elevated, foreground: BoothTheme.text))
+                        Button("Filler kes") {
+                            store.checkpoint(episode)
+                            episode.stripFillers(clipID: clip.id)
+                            store.save(episode)
+                        }
+                        .buttonStyle(BoothButtonStyle(fill: BoothTheme.elevated, foreground: BoothTheme.text))
+                        .disabled(clip.transcriptSegments.filter(\.isFiller).isEmpty)
+                        if !clip.transcriptSegments.isEmpty {
+                            Text(clip.transcriptSegments.map(\.text).joined(separator: " "))
+                                .font(.system(size: 12))
+                                .foregroundStyle(BoothTheme.secondary)
+                        }
+                        if let enhanceError {
+                            Text(enhanceError)
+                                .font(.system(size: 12))
+                                .foregroundStyle(BoothTheme.accent)
+                        }
 
                         Toggle("A/B orijinal", isOn: effectBinding(clip, \.bypassEffects))
                             .foregroundStyle(BoothTheme.text)
@@ -180,6 +201,14 @@ struct InspectorPanel: View {
             Toggle("Auto-level konuşma", isOn: $episode.mix.autoLevelEnabled)
             Toggle("Limiter", isOn: $episode.mix.limiterEnabled)
             Toggle("Kayıtta Voice Isolation", isOn: $episode.mix.captureVoiceIsolation)
+            ForEach($episode.tracks) { $track in
+                HStack {
+                    Text("\(track.name) pan")
+                        .font(.system(size: 12))
+                        .foregroundStyle(BoothTheme.secondary)
+                    Slider(value: $track.pan, in: -1...1)
+                }
+            }
             labeledSlider("Crossfade sn", value: Binding(
                 get: { episode.mix.crossfade },
                 set: { episode.mix.crossfade = $0 }
@@ -268,6 +297,21 @@ struct InspectorPanel: View {
             get: { clip.name },
             set: { value in episode.updateClip(clip.id) { $0.name = value } }
         )
+    }
+
+    private func transcribe(_ clip: Clip) {
+        enhanceError = nil
+        let url = mediaRoot.appendingPathComponent(clip.playbackFilename)
+        Task {
+            do {
+                let result = try await SpeechTranscriber.transcribe(url: url)
+                store.checkpoint(episode)
+                episode.applyTranscript(clipID: clip.id, text: result.text, segments: result.segments)
+                store.save(episode)
+            } catch {
+                enhanceError = error.localizedDescription
+            }
+        }
     }
 
     private func stripSilence(_ clip: Clip) {
